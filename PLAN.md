@@ -119,12 +119,12 @@ src/
    - ✅ Implement global environment variables and paths
 
 5. **Project Configuration** (`config/project.rs`)
-   - Write tests for .runcept.toml parsing and validation
-   - Implement .runcept.toml parsing and validation
-   - Write tests for process dependency resolution
-   - Implement process dependency resolution
-   - Write tests for configuration merging (global + project)
-   - Implement configuration merging (global + project)
+   - ✅ Write tests for .runcept.toml parsing and validation
+   - ✅ Implement .runcept.toml parsing and validation
+   - ✅ Write tests for process dependency resolution
+   - ✅ Implement process dependency resolution
+   - ✅ Write tests for configuration merging (global + project)
+   - ✅ Implement configuration merging (global + project)
 
 6. **Environment Management** (`config/environment.rs`)
    - Write tests for environment activation/deactivation
