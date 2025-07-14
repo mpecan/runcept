@@ -73,6 +73,9 @@ pub enum RunItError {
     #[error("SQL error: {0}")]
     SqlError(#[from] sqlx::Error),
 
+    #[error("Migration error: {0}")]
+    MigrationError(#[from] sqlx::migrate::MigrateError),
+
     #[error("HTTP error: {0}")]
     HttpError(#[from] reqwest::Error),
 
@@ -102,6 +105,8 @@ impl RunItError {
             RunItError::IoError(_) |
             RunItError::HttpError(_) |
             RunItError::DatabaseError(_) |
+            RunItError::SqlError(_) |
+            RunItError::MigrationError(_) |
             RunItError::TimeoutError(_)
         )
     }
@@ -116,6 +121,7 @@ impl RunItError {
             RunItError::IoError(_) => "IO_ERROR",
             RunItError::JsonError(_) => "JSON_ERROR",
             RunItError::SqlError(_) => "SQL_ERROR",
+            RunItError::MigrationError(_) => "MIGRATION_ERROR",
             RunItError::HttpError(_) => "HTTP_ERROR",
             RunItError::SystemError(_) => "SYSTEM_ERROR",
             RunItError::TimeoutError(_) => "TIMEOUT_ERROR",

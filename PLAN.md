@@ -98,10 +98,10 @@ src/
    - ✅ Implement error conversion traits and user-friendly messages
 
 2. **Database Layer** (`database/`)
-   - Write tests for database operations and migrations
-   - Implement SQLite database setup with migrations
-   - Implement schema for processes, environments, and activity tracking
-   - Implement database operations and connection management
+   - ✅ Write tests for database operations and migrations
+   - ✅ Implement SQLite database setup with migrations
+   - ✅ Implement schema for processes, environments, and activity tracking
+   - ✅ Implement database operations and connection management
 
 3. **Process Representation** (`process/process.rs`)
    - Write tests for process struct and state transitions
