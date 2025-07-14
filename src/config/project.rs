@@ -61,7 +61,7 @@ mod tests {
         env_vars.insert("RUST_LOG".to_string(), "debug".to_string());
 
         let config = ProjectConfig {
-            environment: EnvironmentConfig {
+            environment: ProjectEnvironmentConfig {
                 name: "dev-env".to_string(),
                 inactivity_timeout: Some("1h".to_string()),
                 auto_shutdown: Some(true),
@@ -118,7 +118,7 @@ mod tests {
         );
 
         let config = ProjectConfig {
-            environment: EnvironmentConfig {
+            environment: ProjectEnvironmentConfig {
                 name: "test-env".to_string(),
                 inactivity_timeout: Some("2h".to_string()),
                 auto_shutdown: Some(false),
@@ -264,7 +264,7 @@ mod tests {
         env_vars.insert("PROJECT_VAR".to_string(), "project_value".to_string());
 
         let project_config = ProjectConfig {
-            environment: EnvironmentConfig {
+            environment: ProjectEnvironmentConfig {
                 name: "project-env".to_string(),
                 inactivity_timeout: None,   // Should use global default
                 auto_shutdown: Some(false), // Override global
@@ -385,13 +385,13 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectConfig {
     #[serde(default)]
-    pub environment: EnvironmentConfig,
+    pub environment: ProjectEnvironmentConfig,
     #[serde(default)]
     pub processes: HashMap<String, ProcessDefinition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EnvironmentConfig {
+pub struct ProjectEnvironmentConfig {
     #[serde(default)]
     pub name: String,
     pub inactivity_timeout: Option<String>,

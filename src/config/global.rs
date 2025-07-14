@@ -14,6 +14,9 @@ mod tests {
         assert_eq!(config.process.default_inactivity_timeout, "30m");
         assert_eq!(config.process.health_check_interval, 30);
         assert_eq!(config.process.restart_delay, 5);
+        assert_eq!(config.process.inactivity_timeout, 1800);
+        assert_eq!(config.environment.inactivity_timeout, 1800);
+        assert!(config.environment.auto_shutdown_enabled);
         assert_eq!(config.mcp.port, 3000);
         assert!(config.mcp.auto_start);
         assert!(config.logging.level == "info");
@@ -26,6 +29,7 @@ mod tests {
         let toml_str = toml::to_string(&config).unwrap();
         assert!(toml_str.contains("[database]"));
         assert!(toml_str.contains("[process]"));
+        assert!(toml_str.contains("[environment]"));
         assert!(toml_str.contains("[mcp]"));
         assert!(toml_str.contains("[logging]"));
 
@@ -168,12 +172,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GlobalConfig {
     #[serde(default)]
     pub database: DatabaseConfig,
     #[serde(default)]
     pub process: ProcessConfig,
+    #[serde(default)]
+    pub environment: EnvironmentConfig,
     #[serde(default)]
     pub mcp: McpConfig,
     #[serde(default)]
@@ -205,6 +211,22 @@ pub struct ProcessConfig {
     pub max_restart_attempts: u32,
     #[serde(default = "default_auto_restart_on_crash")]
     pub auto_restart_on_crash: bool,
+    #[serde(default = "default_inactivity_timeout_seconds")]
+    pub inactivity_timeout: u32, // seconds
+    #[serde(default = "default_cleanup_interval")]
+    pub cleanup_interval: u32, // seconds
+    #[serde(default = "default_max_activity_age")]
+    pub max_activity_age: u32, // seconds
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentConfig {
+    #[serde(default = "default_environment_inactivity_timeout")]
+    pub inactivity_timeout: u32, // seconds
+    #[serde(default = "default_auto_shutdown_enabled")]
+    pub auto_shutdown_enabled: bool,
+    #[serde(default = "default_graceful_shutdown_timeout")]
+    pub graceful_shutdown_timeout: u32, // seconds
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,6 +274,19 @@ impl Default for ProcessConfig {
             restart_delay: default_restart_delay(),
             max_restart_attempts: default_max_restart_attempts(),
             auto_restart_on_crash: default_auto_restart_on_crash(),
+            inactivity_timeout: default_inactivity_timeout_seconds(),
+            cleanup_interval: default_cleanup_interval(),
+            max_activity_age: default_max_activity_age(),
+        }
+    }
+}
+
+impl Default for EnvironmentConfig {
+    fn default() -> Self {
+        Self {
+            inactivity_timeout: default_environment_inactivity_timeout(),
+            auto_shutdown_enabled: default_auto_shutdown_enabled(),
+            graceful_shutdown_timeout: default_graceful_shutdown_timeout(),
         }
     }
 }
@@ -280,40 +315,6 @@ impl Default for LoggingConfig {
     }
 }
 
-impl Default for GlobalConfig {
-    fn default() -> Self {
-        Self {
-            database: DatabaseConfig {
-                connection_timeout: 30,
-                cleanup_interval_hours: 24,
-                activity_log_retention_days: 30,
-                database_path: None,
-            },
-            process: ProcessConfig {
-                default_inactivity_timeout: "30m".to_string(),
-                health_check_interval: 30,
-                restart_delay: 5,
-                max_restart_attempts: 3,
-                auto_restart_on_crash: true,
-            },
-            mcp: McpConfig {
-                port: 3000,
-                host: "127.0.0.1".to_string(),
-                auto_start: true,
-                auth_enabled: false,
-                auth_token: None,
-            },
-            logging: LoggingConfig {
-                level: "info".to_string(),
-                file_enabled: true,
-                file_path: None,
-                max_file_size_mb: 10,
-                max_files: 5,
-            },
-            global_env_vars: HashMap::new(),
-        }
-    }
-}
 
 impl GlobalConfig {
     pub async fn load() -> Result<Self> {
@@ -497,4 +498,28 @@ fn default_max_file_size_mb() -> u32 {
 }
 fn default_max_files() -> u32 {
     5
+}
+
+fn default_inactivity_timeout_seconds() -> u32 {
+    1800 // 30 minutes
+}
+
+fn default_cleanup_interval() -> u32 {
+    300 // 5 minutes
+}
+
+fn default_max_activity_age() -> u32 {
+    3600 // 1 hour
+}
+
+fn default_environment_inactivity_timeout() -> u32 {
+    1800 // 30 minutes
+}
+
+fn default_auto_shutdown_enabled() -> bool {
+    true
+}
+
+fn default_graceful_shutdown_timeout() -> u32 {
+    30 // 30 seconds
 }

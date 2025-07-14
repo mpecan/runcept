@@ -157,12 +157,12 @@ src/
 
 ### Phase 4: Scheduling & Auto-shutdown
 8. **Inactivity Tracking** (`scheduler/inactivity.rs`)
-   - Write tests for activity monitoring
-   - Implement activity monitoring per process and environment
-   - Write tests for configurable timeout handling
-   - Implement configurable timeout handling
-   - Write tests for graceful shutdown sequences
-   - Implement graceful shutdown sequences
+   - ✅ Write tests for activity monitoring
+   - ✅ Implement activity monitoring per process and environment
+   - ✅ Write tests for configurable timeout handling
+   - ✅ Implement configurable timeout handling
+   - ✅ Write tests for graceful shutdown sequences
+   - ✅ Implement graceful shutdown sequences
 
 9. **Health Monitoring** (`scheduler/health.rs`)
    - Write tests for periodic health check execution
