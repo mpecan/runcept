@@ -1,11 +1,12 @@
-# Runit
+# Runcept
 
-A Rust-based process manager that provides both MCP (Model Context Protocol) server capabilities and a command-line interface for managing long-running processes.
+**Run + Intercept** - A Rust-based process manager that runs and intercepts synchronous processes, providing both MCP (Model Context Protocol) server capabilities and a command-line interface for intelligent process management.
 
 ## Features
 
+- **Process Interception**: Run and intercept synchronous processes with intelligent management
 - **Process Management**: Start, stop, restart, and monitor long-running processes
-- **Project-based Configuration**: Define processes per project with `.runit.toml` files
+- **Project-based Configuration**: Define processes per project with `.runcept.toml` files
 - **Environment Activation**: Activate/deactivate project environments with all their processes
 - **Auto-shutdown**: Automatically stop inactive processes after configurable timeout
 - **MCP Server**: Provides MCP tools for AI assistants to manage processes and environments
@@ -35,7 +36,7 @@ cargo build --release
 
 ### Project Configuration
 
-Create a `.runit.toml` file in your project root:
+Create a `.runcept.toml` file in your project root:
 
 ```toml
 [project]
@@ -95,7 +96,7 @@ runit-mcp
 The MCP server provides the following tools:
 
 **Environment Management:**
-- `activate_environment`: Activate a project environment from .runit.toml
+- `activate_environment`: Activate a project environment from .runcept.toml
 - `deactivate_environment`: Deactivate current environment
 - `list_environments`: List all available project environments
 - `get_environment_status`: Get detailed environment status

@@ -1,15 +1,15 @@
-# Runit Implementation Plan
+# Runcept Implementation Plan
 
 ## Project Overview
 
 Build a Rust-based process manager with dual interfaces and project-based configuration:
 1. **MCP Server**: Provides AI assistants with process and environment management capabilities
 2. **CLI Interface**: Direct command-line process and environment management
-3. **Project Configuration**: `.runit.toml` files define project-specific processes
+3. **Project Configuration**: `.runcept.toml` files define project-specific processes
 4. **Environment Activation**: Activate/deactivate entire project environments
 5. **Auto-shutdown**: Configurable inactivity timeouts for resource management
 
-## Configuration Format (.runit.toml)
+## Configuration Format (.runcept.toml)
 
 ```toml
 [project]
@@ -65,7 +65,7 @@ src/
 │   └── monitor.rs      # Process monitoring and health checks
 ├── config/             # Configuration system
 │   ├── mod.rs          # Module exports
-│   ├── project.rs      # .runit.toml parsing and validation
+│   ├── project.rs      # .runcept.toml parsing and validation
 │   ├── environment.rs  # Environment activation/deactivation
 │   └── settings.rs     # Global settings and defaults
 ├── database/           # SQLite persistence layer
@@ -119,8 +119,8 @@ src/
    - ✅ Implement global environment variables and paths
 
 5. **Project Configuration** (`config/project.rs`)
-   - Write tests for .runit.toml parsing and validation
-   - Implement .runit.toml parsing and validation
+   - Write tests for .runcept.toml parsing and validation
+   - Implement .runcept.toml parsing and validation
    - Write tests for process dependency resolution
    - Implement process dependency resolution
    - Write tests for configuration merging (global + project)
@@ -199,7 +199,7 @@ src/
 ## Key Features to Implement
 
 ### Configuration System
-- **.runit.toml Files**: Project-specific process definitions
+- **.runcept.toml Files**: Project-specific process definitions
 - **Environment Activation**: Activate/deactivate entire project environments
 - **Process Dependencies**: Define startup order and dependencies
 - **Auto-shutdown**: Configurable inactivity timeouts
@@ -217,7 +217,7 @@ src/
 
 ### MCP Tools
 **Environment Management:**
-- `activate_environment`: Activate a project environment from .runit.toml
+- `activate_environment`: Activate a project environment from .runcept.toml
 - `deactivate_environment`: Deactivate current environment
 - `list_environments`: List all available project environments
 - `get_environment_status`: Get detailed environment status

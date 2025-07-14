@@ -83,13 +83,13 @@ mod tests {
     #[tokio::test]
     async fn test_project_config_load_missing_file() {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".runit.toml");
+        let config_path = temp_dir.path().join(".runcept.toml");
 
         let result = ProjectConfig::load_from_path(&config_path).await;
         assert!(result.is_err());
 
         match result.err().unwrap() {
-            crate::error::RunItError::ConfigError(msg) => {
+            crate::error::RunceptError::ConfigError(msg) => {
                 assert!(msg.contains("not found"));
             }
             _ => panic!("Expected ConfigError"),
@@ -99,7 +99,7 @@ mod tests {
     #[tokio::test]
     async fn test_project_config_load_and_save() {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".runit.toml");
+        let config_path = temp_dir.path().join(".runcept.toml");
 
         let mut processes = HashMap::new();
         // Don't add invalid dependencies for this test
@@ -185,7 +185,7 @@ mod tests {
         assert!(result.is_err());
 
         match result.err().unwrap() {
-            crate::error::RunItError::ConfigError(msg) => {
+            crate::error::RunceptError::ConfigError(msg) => {
                 assert!(msg.contains("dependency"));
                 assert!(msg.contains("nonexistent"));
             }
@@ -249,7 +249,7 @@ mod tests {
         assert!(result.is_err());
 
         match result.err().unwrap() {
-            crate::error::RunItError::ConfigError(msg) => {
+            crate::error::RunceptError::ConfigError(msg) => {
                 assert!(msg.contains("Circular") || msg.contains("circular"));
             }
             _ => panic!("Expected ConfigError about circular dependency"),
@@ -356,7 +356,7 @@ mod tests {
 
         tokio::fs::create_dir_all(&subdir).await.unwrap();
 
-        let config_path = project_dir.join(".runit.toml");
+        let config_path = project_dir.join(".runcept.toml");
         let config = ProjectConfig::default();
         config.save_to_path(&config_path).await.unwrap();
 
@@ -377,7 +377,7 @@ mod tests {
 }
 
 use crate::config::global::GlobalConfig;
-use crate::error::{Result, RunItError};
+use crate::error::{Result, RunceptError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -417,7 +417,7 @@ pub struct ProcessDefinition {
 impl ProjectConfig {
     pub async fn load_from_path(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Err(RunItError::ConfigError(format!(
+            return Err(RunceptError::ConfigError(format!(
                 "Project configuration file not found: {}",
                 path.display()
             )));
@@ -439,7 +439,7 @@ impl ProjectConfig {
         }
 
         let content = toml::to_string_pretty(self)
-            .map_err(|e| RunItError::ConfigError(format!("Failed to serialize config: {e}")))?;
+            .map_err(|e| RunceptError::ConfigError(format!("Failed to serialize config: {e}")))?;
 
         tokio::fs::write(path, content).await?;
         Ok(())
@@ -448,7 +448,7 @@ impl ProjectConfig {
     pub fn validate(&self) -> Result<()> {
         // Validate environment name
         if self.environment.name.trim().is_empty() {
-            return Err(RunItError::ConfigError(
+            return Err(RunceptError::ConfigError(
                 "Environment name cannot be empty".to_string(),
             ));
         }
@@ -456,7 +456,7 @@ impl ProjectConfig {
         // Validate inactivity timeout format if specified
         if let Some(timeout) = &self.environment.inactivity_timeout {
             if !is_valid_timeout_format(timeout) {
-                return Err(RunItError::ConfigError(format!(
+                return Err(RunceptError::ConfigError(format!(
                     "Invalid timeout format: {timeout}. Use formats like '30m', '1h', '2h30m'"
                 )));
             }
@@ -468,7 +468,7 @@ impl ProjectConfig {
         for (process_name, process_def) in &self.processes {
             for dependency in &process_def.depends_on {
                 if !process_names.contains(dependency) {
-                    return Err(RunItError::ConfigError(format!(
+                    return Err(RunceptError::ConfigError(format!(
                         "Process '{process_name}' has dependency '{dependency}' which does not exist"
                     )));
                 }
@@ -484,7 +484,7 @@ impl ProjectConfig {
     fn validate_no_circular_dependencies(&self) -> Result<()> {
         for process_name in self.processes.keys() {
             if self.has_circular_dependency(process_name, &mut HashSet::new()) {
-                return Err(RunItError::ConfigError(format!(
+                return Err(RunceptError::ConfigError(format!(
                     "Circular dependency detected involving process '{process_name}'"
                 )));
             }
@@ -598,7 +598,7 @@ impl ProjectConfig {
 
         // Check if all processes were included (no circular dependencies)
         if order.len() != self.processes.len() {
-            return Err(RunItError::ConfigError(
+            return Err(RunceptError::ConfigError(
                 "Circular dependencies detected in process configuration".to_string(),
             ));
         }
@@ -619,7 +619,7 @@ pub async fn find_project_config(start_path: &Path) -> Result<Option<PathBuf>> {
     let mut current_path = start_path.to_path_buf();
 
     loop {
-        let config_path = current_path.join(".runit.toml");
+        let config_path = current_path.join(".runcept.toml");
 
         if config_path.exists() {
             return Ok(Some(config_path));

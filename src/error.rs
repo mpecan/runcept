@@ -4,44 +4,44 @@ mod tests {
 
     #[test]
     fn test_process_error_creation() {
-        let error = RunItError::ProcessError("test process error".to_string());
+        let error = RunceptError::ProcessError("test process error".to_string());
         assert_eq!(error.to_string(), "Process error: test process error");
     }
 
     #[test]
     fn test_config_error_creation() {
-        let error = RunItError::ConfigError("invalid config".to_string());
+        let error = RunceptError::ConfigError("invalid config".to_string());
         assert_eq!(error.to_string(), "Configuration error: invalid config");
     }
 
     #[test]
     fn test_database_error_creation() {
-        let error = RunItError::DatabaseError("connection failed".to_string());
+        let error = RunceptError::DatabaseError("connection failed".to_string());
         assert_eq!(error.to_string(), "Database error: connection failed");
     }
 
     #[test]
     fn test_io_error_conversion() {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let runit_error: RunItError = io_error.into();
-        assert!(matches!(runit_error, RunItError::IoError(_)));
+        let runcept_error: RunceptError = io_error.into();
+        assert!(matches!(runcept_error, RunceptError::IoError(_)));
     }
 
     #[test]
     fn test_toml_error_conversion() {
         let invalid_toml = "invalid = [toml";
         let toml_error = toml::from_str::<toml::Value>(invalid_toml).unwrap_err();
-        let runit_error: RunItError = toml_error.into();
-        assert!(matches!(runit_error, RunItError::ConfigError(_)));
+        let runcept_error: RunceptError = toml_error.into();
+        assert!(matches!(runcept_error, RunceptError::ConfigError(_)));
     }
 
     #[test]
     fn test_error_is_retriable() {
         let io_error =
-            RunItError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
+            RunceptError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
         assert!(io_error.is_retriable());
 
-        let config_error = RunItError::ConfigError("test".to_string());
+        let config_error = RunceptError::ConfigError("test".to_string());
         assert!(!config_error.is_retriable());
     }
 }
@@ -49,7 +49,7 @@ mod tests {
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum RunItError {
+pub enum RunceptError {
     #[error("Process error: {0}")]
     ProcessError(String),
 
@@ -87,47 +87,47 @@ pub enum RunItError {
     TimeoutError(String),
 }
 
-impl From<toml::de::Error> for RunItError {
+impl From<toml::de::Error> for RunceptError {
     fn from(error: toml::de::Error) -> Self {
-        RunItError::ConfigError(error.to_string())
+        RunceptError::ConfigError(error.to_string())
     }
 }
 
-impl From<nix::Error> for RunItError {
+impl From<nix::Error> for RunceptError {
     fn from(error: nix::Error) -> Self {
-        RunItError::SystemError(error.to_string())
+        RunceptError::SystemError(error.to_string())
     }
 }
 
-impl RunItError {
+impl RunceptError {
     pub fn is_retriable(&self) -> bool {
         matches!(
             self,
-            RunItError::IoError(_)
-                | RunItError::HttpError(_)
-                | RunItError::DatabaseError(_)
-                | RunItError::SqlError(_)
-                | RunItError::MigrationError(_)
-                | RunItError::TimeoutError(_)
+            RunceptError::IoError(_)
+                | RunceptError::HttpError(_)
+                | RunceptError::DatabaseError(_)
+                | RunceptError::SqlError(_)
+                | RunceptError::MigrationError(_)
+                | RunceptError::TimeoutError(_)
         )
     }
 
     pub fn error_code(&self) -> &'static str {
         match self {
-            RunItError::ProcessError(_) => "PROCESS_ERROR",
-            RunItError::ConfigError(_) => "CONFIG_ERROR",
-            RunItError::DatabaseError(_) => "DATABASE_ERROR",
-            RunItError::EnvironmentError(_) => "ENVIRONMENT_ERROR",
-            RunItError::McpError(_) => "MCP_ERROR",
-            RunItError::IoError(_) => "IO_ERROR",
-            RunItError::JsonError(_) => "JSON_ERROR",
-            RunItError::SqlError(_) => "SQL_ERROR",
-            RunItError::MigrationError(_) => "MIGRATION_ERROR",
-            RunItError::HttpError(_) => "HTTP_ERROR",
-            RunItError::SystemError(_) => "SYSTEM_ERROR",
-            RunItError::TimeoutError(_) => "TIMEOUT_ERROR",
+            RunceptError::ProcessError(_) => "PROCESS_ERROR",
+            RunceptError::ConfigError(_) => "CONFIG_ERROR",
+            RunceptError::DatabaseError(_) => "DATABASE_ERROR",
+            RunceptError::EnvironmentError(_) => "ENVIRONMENT_ERROR",
+            RunceptError::McpError(_) => "MCP_ERROR",
+            RunceptError::IoError(_) => "IO_ERROR",
+            RunceptError::JsonError(_) => "JSON_ERROR",
+            RunceptError::SqlError(_) => "SQL_ERROR",
+            RunceptError::MigrationError(_) => "MIGRATION_ERROR",
+            RunceptError::HttpError(_) => "HTTP_ERROR",
+            RunceptError::SystemError(_) => "SYSTEM_ERROR",
+            RunceptError::TimeoutError(_) => "TIMEOUT_ERROR",
         }
     }
 }
 
-pub type Result<T> = std::result::Result<T, RunItError>;
+pub type Result<T> = std::result::Result<T, RunceptError>;

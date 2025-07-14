@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn test_get_config_dir() {
         let config_dir = get_config_dir().unwrap();
-        assert!(config_dir.ends_with(".runit"));
+        assert!(config_dir.ends_with(".runcept"));
     }
 
     #[tokio::test]
@@ -112,7 +112,7 @@ default_inactivity_timeout = "2h"
             env::set_var("HOME", temp_dir.path());
         }
 
-        let manager = GlobalConfigManager::new_with_custom_dir(temp_dir.path().join(".runit"));
+        let manager = GlobalConfigManager::new_with_custom_dir(temp_dir.path().join(".runcept"));
 
         let config = manager.load().await.unwrap();
         assert_eq!(config.database.connection_timeout, 30); // default
@@ -163,7 +163,7 @@ default_inactivity_timeout = "2h"
     }
 }
 
-use crate::error::{Result, RunItError};
+use crate::error::{Result, RunceptError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -190,7 +190,7 @@ pub struct DatabaseConfig {
     pub cleanup_interval_hours: u32,
     #[serde(default = "default_activity_log_retention_days")]
     pub activity_log_retention_days: u32,
-    pub database_path: Option<String>, // If None, uses default ~/.runit/runit.db
+    pub database_path: Option<String>, // If None, uses default ~/.runcept/runcept.db
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,7 +226,7 @@ pub struct LoggingConfig {
     pub level: String, // "trace", "debug", "info", "warn", "error"
     #[serde(default = "default_file_enabled")]
     pub file_enabled: bool,
-    pub file_path: Option<String>, // If None, uses default ~/.runit/logs/
+    pub file_path: Option<String>, // If None, uses default ~/.runcept/logs/
     #[serde(default = "default_max_file_size_mb")]
     pub max_file_size_mb: u32,
     #[serde(default = "default_max_files")]
@@ -350,7 +350,7 @@ impl GlobalConfig {
         }
 
         let content = toml::to_string_pretty(self)
-            .map_err(|e| RunItError::ConfigError(format!("Failed to serialize config: {e}")))?;
+            .map_err(|e| RunceptError::ConfigError(format!("Failed to serialize config: {e}")))?;
 
         tokio::fs::write(path, content).await?;
         Ok(())
@@ -359,14 +359,14 @@ impl GlobalConfig {
     pub fn validate(&self) -> Result<()> {
         // Validate database config
         if self.database.connection_timeout == 0 {
-            return Err(RunItError::ConfigError(
+            return Err(RunceptError::ConfigError(
                 "Database connection timeout must be greater than 0".to_string(),
             ));
         }
 
         // Validate MCP config
         if self.mcp.port == 0 {
-            return Err(RunItError::ConfigError(
+            return Err(RunceptError::ConfigError(
                 "MCP port must be between 1 and 65535".to_string(),
             ));
         }
@@ -374,7 +374,7 @@ impl GlobalConfig {
         // Validate logging level
         let valid_levels = ["trace", "debug", "info", "warn", "error"];
         if !valid_levels.contains(&self.logging.level.as_str()) {
-            return Err(RunItError::ConfigError(format!(
+            return Err(RunceptError::ConfigError(format!(
                 "Invalid logging level: {}",
                 self.logging.level
             )));
@@ -393,8 +393,8 @@ impl GlobalConfig {
         match &self.database.database_path {
             Some(path) => PathBuf::from(path),
             None => {
-                let config_dir = get_config_dir().unwrap_or_else(|_| PathBuf::from(".runit"));
-                config_dir.join("runit.db")
+                let config_dir = get_config_dir().unwrap_or_else(|_| PathBuf::from(".runcept"));
+                config_dir.join("runcept.db")
             }
         }
     }
@@ -403,7 +403,7 @@ impl GlobalConfig {
         match &self.logging.file_path {
             Some(path) => PathBuf::from(path),
             None => {
-                let config_dir = get_config_dir().unwrap_or_else(|_| PathBuf::from(".runit"));
+                let config_dir = get_config_dir().unwrap_or_else(|_| PathBuf::from(".runcept"));
                 config_dir.join("logs")
             }
         }
@@ -447,9 +447,9 @@ impl GlobalConfigManager {
 pub fn get_config_dir() -> Result<PathBuf> {
     let home_dir = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
-        .map_err(|_| RunItError::ConfigError("Could not determine home directory".to_string()))?;
+        .map_err(|_| RunceptError::ConfigError("Could not determine home directory".to_string()))?;
 
-    Ok(PathBuf::from(home_dir).join(".runit"))
+    Ok(PathBuf::from(home_dir).join(".runcept"))
 }
 
 // Default value functions for serde

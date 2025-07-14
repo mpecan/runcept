@@ -1,7 +1,7 @@
-# Claude Development Instructions for Runit
+# Claude Development Instructions for Runcept
 
 ## Project Context
-This is the "runit" project - a Rust-based process manager with both MCP server and CLI capabilities for managing long-running processes.
+This is the "runcept" project - a Rust-based process manager with both MCP server and CLI capabilities for managing long-running processes.
 
 ## Development Guidelines
 

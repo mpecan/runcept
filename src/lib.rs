@@ -3,4 +3,4 @@ pub mod database;
 pub mod error;
 pub mod process;
 
-pub use error::{Result, RunItError};
+pub use error::{Result, RunceptError};
