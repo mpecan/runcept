@@ -148,12 +148,12 @@ src/
    - ✅ Implement batch operations (stop all, cleanup)
 
 8. **Process Monitoring** (`process/monitor.rs`)
-   - Write tests for health check execution
-   - Implement health check execution
-   - Write tests for process status tracking
-   - Implement process status tracking
-   - Write tests for crash detection and auto-restart
-   - Implement crash detection and auto-restart
+   - ✅ Write tests for health check execution
+   - ✅ Implement health check execution
+   - ✅ Write tests for process status tracking
+   - ✅ Implement process status tracking
+   - ✅ Write tests for crash detection and auto-restart
+   - ✅ Implement crash detection and auto-restart
 
 ### Phase 4: Scheduling & Auto-shutdown
 8. **Inactivity Tracking** (`scheduler/inactivity.rs`)
