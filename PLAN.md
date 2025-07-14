@@ -127,25 +127,27 @@ src/
    - ✅ Implement configuration merging (global + project)
 
 6. **Environment Management** (`config/environment.rs`)
-   - Write tests for environment activation/deactivation
-   - Implement environment activation/deactivation logic
-   - Write tests for project discovery and registration
-   - Implement project discovery and registration
-   - Write tests for configuration inheritance
-   - Implement configuration inheritance
+   - ✅ Write tests for environment activation/deactivation
+   - ✅ Implement environment activation/deactivation logic
+   - ✅ Write tests for project discovery and registration
+   - ✅ Implement project discovery and registration
+   - ✅ Write tests for configuration inheritance
+   - ✅ Implement configuration inheritance
 
 ### Phase 3: Process Management
-6. **Process Manager** (`process/manager.rs`)
-   - Write tests for process lifecycle operations
-   - Implement process lifecycle operations (start, stop, restart)
-   - Write tests for signal handling and cleanup
-   - Implement signal handling and cleanup
-   - Write tests for dependency management
-   - Implement dependency management
-   - Write tests for log capture and management
-   - Implement log capture and management
+7. **Process Manager** (`process/manager.rs`)
+   - ✅ Write tests for process lifecycle operations
+   - ✅ Implement process lifecycle operations (start, stop, restart)
+   - ✅ Write tests for signal handling and cleanup
+   - ✅ Implement signal handling and cleanup
+   - ✅ Write tests for async process spawning and monitoring
+   - ✅ Implement async process spawning and monitoring
+   - ✅ Write tests for environment variable injection
+   - ✅ Implement environment variable injection
+   - ✅ Write tests for batch operations (stop all, cleanup)
+   - ✅ Implement batch operations (stop all, cleanup)
 
-7. **Process Monitoring** (`process/monitor.rs`)
+8. **Process Monitoring** (`process/monitor.rs`)
    - Write tests for health check execution
    - Implement health check execution
    - Write tests for process status tracking
