@@ -1,0 +1,21 @@
+[environment]
+name = "test-project"
+
+[processes.web]
+name = "web"
+command = "python -m http.server 8000"
+working_dir = "."
+auto_restart = true
+
+[processes.worker]
+name = "worker"
+command = "echo 'Hello from worker' && sleep 5"
+working_dir = "."
+auto_restart = false
+
+[processes.database]
+name = "database"
+command = "echo 'Starting fake database' && sleep 10"
+working_dir = "."
+auto_restart = true
+depends_on = []

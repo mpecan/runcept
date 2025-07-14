@@ -7,7 +7,7 @@ mod tests {
     async fn test_daemon_client_creation() {
         let temp_dir = TempDir::new().unwrap();
         let socket_path = temp_dir.path().join("test.sock");
-        
+
         let client = DaemonClient::new(socket_path.clone());
         assert_eq!(client.socket_path, socket_path);
     }
@@ -21,10 +21,12 @@ mod tests {
 
     #[test]
     fn test_request_serialization() {
-        let request = DaemonRequest::StartProcess { name: "test".to_string() };
+        let request = DaemonRequest::StartProcess {
+            name: "test".to_string(),
+        };
         let serialized = serde_json::to_string(&request).unwrap();
         let deserialized: DaemonRequest = serde_json::from_str(&serialized).unwrap();
-        
+
         match deserialized {
             DaemonRequest::StartProcess { name } => assert_eq!(name, "test"),
             _ => panic!("Unexpected request type"),
@@ -33,10 +35,12 @@ mod tests {
 
     #[test]
     fn test_response_serialization() {
-        let response = DaemonResponse::Success { message: "OK".to_string() };
+        let response = DaemonResponse::Success {
+            message: "OK".to_string(),
+        };
         let serialized = serde_json::to_string(&response).unwrap();
         let deserialized: DaemonResponse = serde_json::from_str(&serialized).unwrap();
-        
+
         match deserialized {
             DaemonResponse::Success { message } => assert_eq!(message, "OK"),
             _ => panic!("Unexpected response type"),
@@ -74,14 +78,20 @@ impl DaemonClient {
     /// Send a request to the daemon and get response
     pub async fn send_request(&self, request: DaemonRequest) -> Result<DaemonResponse> {
         // Serialize the request
-        let request_json = serde_json::to_string(&request)
-            .map_err(|e| RunceptError::SerializationError(format!("Failed to serialize request: {e}")))?;
+        let request_json = serde_json::to_string(&request).map_err(|e| {
+            RunceptError::SerializationError(format!("Failed to serialize request: {e}"))
+        })?;
 
         // Connect to daemon socket
         let stream = timeout(self.timeout, UnixStream::connect(&self.socket_path))
             .await
             .map_err(|_| RunceptError::ConnectionError("Timeout connecting to daemon".to_string()))?
-            .map_err(|e| RunceptError::ConnectionError(format!("Failed to connect to daemon at {:?}: {e}", self.socket_path)))?;
+            .map_err(|e| {
+                RunceptError::ConnectionError(format!(
+                    "Failed to connect to daemon at {:?}: {e}",
+                    self.socket_path
+                ))
+            })?;
 
         let (mut reader, mut writer) = stream.into_split();
 
@@ -95,12 +105,14 @@ impl DaemonClient {
         // Read response
         let mut buffer = Vec::new();
         let mut temp_buf = [0; 1024];
-        
+
         loop {
             let bytes_read = timeout(self.timeout, reader.read(&mut temp_buf))
                 .await
                 .map_err(|_| RunceptError::ConnectionError("Timeout reading response".to_string()))?
-                .map_err(|e| RunceptError::ConnectionError(format!("Failed to read response: {e}")))?;
+                .map_err(|e| {
+                    RunceptError::ConnectionError(format!("Failed to read response: {e}"))
+                })?;
 
             if bytes_read == 0 {
                 break;
@@ -115,37 +127,43 @@ impl DaemonClient {
         }
 
         // Parse response
-        let response_str = String::from_utf8(buffer)
-            .map_err(|e| RunceptError::SerializationError(format!("Invalid UTF-8 in response: {e}")))?;
-        
+        let response_str = String::from_utf8(buffer).map_err(|e| {
+            RunceptError::SerializationError(format!("Invalid UTF-8 in response: {e}"))
+        })?;
+
         let response_str = response_str.trim();
-        let response: DaemonResponse = serde_json::from_str(response_str)
-            .map_err(|e| RunceptError::SerializationError(format!("Failed to parse response: {e}")))?;
+        let response: DaemonResponse = serde_json::from_str(response_str).map_err(|e| {
+            RunceptError::SerializationError(format!("Failed to parse response: {e}"))
+        })?;
 
         Ok(response)
     }
 
     /// Check if the daemon is running by trying to connect
     pub async fn is_daemon_running(&self) -> bool {
-        match timeout(Duration::from_secs(1), UnixStream::connect(&self.socket_path)).await {
-            Ok(Ok(_)) => true,
-            _ => false,
-        }
+        matches!(
+            timeout(
+                Duration::from_secs(1),
+                UnixStream::connect(&self.socket_path),
+            )
+            .await,
+            Ok(Ok(_))
+        )
     }
 
     /// Wait for daemon to be available (useful after starting daemon)
     pub async fn wait_for_daemon(&self, max_wait: Duration) -> Result<()> {
         let start = std::time::Instant::now();
-        
+
         while start.elapsed() < max_wait {
             if self.is_daemon_running().await {
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        
+
         Err(RunceptError::ConnectionError(
-            "Timeout waiting for daemon to start".to_string()
+            "Timeout waiting for daemon to start".to_string(),
         ))
     }
 }
@@ -170,12 +188,14 @@ pub fn get_default_socket_path() -> PathBuf {
 impl DaemonClient {
     /// Activate an environment
     pub async fn activate_environment(&self, path: Option<String>) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::ActivateEnvironment { path }).await
+        self.send_request(DaemonRequest::ActivateEnvironment { path })
+            .await
     }
 
     /// Deactivate current environment
     pub async fn deactivate_environment(&self) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::DeactivateEnvironment).await
+        self.send_request(DaemonRequest::DeactivateEnvironment)
+            .await
     }
 
     /// Get environment status
@@ -185,7 +205,8 @@ impl DaemonClient {
 
     /// Start a process
     pub async fn start_process(&self, name: String) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::StartProcess { name }).await
+        self.send_request(DaemonRequest::StartProcess { name })
+            .await
     }
 
     /// Stop a process
@@ -195,7 +216,8 @@ impl DaemonClient {
 
     /// Restart a process
     pub async fn restart_process(&self, name: String) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::RestartProcess { name }).await
+        self.send_request(DaemonRequest::RestartProcess { name })
+            .await
     }
 
     /// List processes in current environment
@@ -204,8 +226,13 @@ impl DaemonClient {
     }
 
     /// Get process logs
-    pub async fn get_process_logs(&self, name: String, lines: Option<usize>) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::GetProcessLogs { name, lines }).await
+    pub async fn get_process_logs(
+        &self,
+        name: String,
+        lines: Option<usize>,
+    ) -> Result<DaemonResponse> {
+        self.send_request(DaemonRequest::GetProcessLogs { name, lines })
+            .await
     }
 
     /// List all processes across environments
@@ -238,9 +265,10 @@ pub async fn check_daemon_connection(socket_path: Option<PathBuf>) -> Result<()>
     };
 
     if !client.is_daemon_running().await {
-        return Err(RunceptError::ConnectionError(
-            format!("Daemon not running. Socket path: {:?}\nTry running: runcept daemon start", client.socket_path)
-        ));
+        return Err(RunceptError::ConnectionError(format!(
+            "Daemon not running. Socket path: {:?}\nTry running: runcept daemon start",
+            client.socket_path
+        )));
     }
 
     // Test with a simple status request

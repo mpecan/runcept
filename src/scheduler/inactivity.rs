@@ -18,9 +18,9 @@ mod tests {
     async fn test_record_process_activity() {
         let tracker = ActivityTracker::new();
         let process_id = "test-process-1".to_string();
-        
+
         tracker.record_process_activity(&process_id).await;
-        
+
         let activities = tracker.process_activities.read().await;
         assert!(activities.contains_key(&process_id));
         let activity = activities.get(&process_id).unwrap();
@@ -31,9 +31,9 @@ mod tests {
     async fn test_record_environment_activity() {
         let tracker = ActivityTracker::new();
         let env_id = "test-env-1".to_string();
-        
+
         tracker.record_environment_activity(&env_id).await;
-        
+
         let activities = tracker.environment_activities.read().await;
         assert!(activities.contains_key(&env_id));
     }
@@ -42,10 +42,12 @@ mod tests {
     async fn test_check_process_inactivity_within_timeout() {
         let tracker = ActivityTracker::new();
         let process_id = "test-process-1".to_string();
-        
+
         tracker.record_process_activity(&process_id).await;
-        
-        let is_inactive = tracker.check_process_inactivity(&process_id, Duration::from_secs(10)).await;
+
+        let is_inactive = tracker
+            .check_process_inactivity(&process_id, Duration::from_secs(10))
+            .await;
         assert!(!is_inactive);
     }
 
@@ -53,36 +55,46 @@ mod tests {
     async fn test_check_process_inactivity_beyond_timeout() {
         let tracker = ActivityTracker::new();
         let process_id = "test-process-1".to_string();
-        
+
         // Manually insert old activity
         {
             let mut activities = tracker.process_activities.write().await;
-            activities.insert(process_id.clone(), ActivityInfo {
-                last_activity_time: Instant::now() - Duration::from_secs(20),
-                activity_count: 1,
-            });
+            activities.insert(
+                process_id.clone(),
+                ActivityInfo {
+                    last_activity_time: Instant::now() - Duration::from_secs(20),
+                    activity_count: 1,
+                },
+            );
         }
-        
-        let is_inactive = tracker.check_process_inactivity(&process_id, Duration::from_secs(10)).await;
+
+        let is_inactive = tracker
+            .check_process_inactivity(&process_id, Duration::from_secs(10))
+            .await;
         assert!(is_inactive);
     }
 
     #[tokio::test]
     async fn test_get_all_inactive_processes() {
         let tracker = ActivityTracker::new();
-        
+
         // Add active and inactive processes
         tracker.record_process_activity("active-process").await;
-        
+
         {
             let mut activities = tracker.process_activities.write().await;
-            activities.insert("inactive-process".to_string(), ActivityInfo {
-                last_activity_time: Instant::now() - Duration::from_secs(20),
-                activity_count: 1,
-            });
+            activities.insert(
+                "inactive-process".to_string(),
+                ActivityInfo {
+                    last_activity_time: Instant::now() - Duration::from_secs(20),
+                    activity_count: 1,
+                },
+            );
         }
-        
-        let inactive = tracker.get_all_inactive_processes(Duration::from_secs(10)).await;
+
+        let inactive = tracker
+            .get_all_inactive_processes(Duration::from_secs(10))
+            .await;
         assert_eq!(inactive.len(), 1);
         assert!(inactive.contains(&"inactive-process".to_string()));
     }
@@ -90,21 +102,26 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_old_activities() {
         let tracker = ActivityTracker::new();
-        
+
         // Add recent and old activities
         tracker.record_process_activity("recent-process").await;
-        
+
         {
             let mut activities = tracker.process_activities.write().await;
-            activities.insert("old-process".to_string(), ActivityInfo {
-                last_activity_time: Instant::now() - Duration::from_secs(7200), // 2 hours old
-                activity_count: 1,
-            });
+            activities.insert(
+                "old-process".to_string(),
+                ActivityInfo {
+                    last_activity_time: Instant::now() - Duration::from_secs(7200), // 2 hours old
+                    activity_count: 1,
+                },
+            );
         }
-        
-        let cleaned = tracker.cleanup_old_activities(Duration::from_secs(3600)).await; // 1 hour cutoff
+
+        let cleaned = tracker
+            .cleanup_old_activities(Duration::from_secs(3600))
+            .await; // 1 hour cutoff
         assert_eq!(cleaned, 1);
-        
+
         let activities = tracker.process_activities.read().await;
         assert!(activities.contains_key("recent-process"));
         assert!(!activities.contains_key("old-process"));
@@ -114,27 +131,39 @@ mod tests {
     async fn test_inactivity_scheduler_creation() {
         let global_config = GlobalConfig::default();
         let scheduler = InactivityScheduler::new(global_config);
-        
-        assert!(!scheduler.is_running.load(std::sync::atomic::Ordering::Relaxed));
+
+        assert!(
+            !scheduler
+                .is_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
 
     #[tokio::test]
     async fn test_inactivity_scheduler_start_stop() {
         let global_config = GlobalConfig::default();
         let mut scheduler = InactivityScheduler::new(global_config);
-        
+
         scheduler.start().await.unwrap();
-        assert!(scheduler.is_running.load(std::sync::atomic::Ordering::Relaxed));
-        
+        assert!(
+            scheduler
+                .is_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+
         scheduler.stop().await.unwrap();
-        assert!(!scheduler.is_running.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(
+            !scheduler
+                .is_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
 
     #[tokio::test]
     async fn test_schedule_process_shutdown() {
         let global_config = GlobalConfig::default();
         let mut scheduler = InactivityScheduler::new(global_config);
-        
+
         let temp_dir = TempDir::new().unwrap();
         let process = Process::new(
             "test-process".to_string(),
@@ -142,9 +171,12 @@ mod tests {
             temp_dir.path().to_string_lossy().to_string(),
             "env-1".to_string(),
         );
-        
-        scheduler.schedule_process_shutdown(&process.id, Duration::from_millis(100)).await.unwrap();
-        
+
+        scheduler
+            .schedule_process_shutdown(&process.id, Duration::from_millis(100))
+            .await
+            .unwrap();
+
         let timers = scheduler.shutdown_timers.read().await;
         assert!(timers.contains_key(&process.id));
     }
@@ -153,7 +185,7 @@ mod tests {
     async fn test_cancel_process_shutdown() {
         let global_config = GlobalConfig::default();
         let mut scheduler = InactivityScheduler::new(global_config);
-        
+
         let temp_dir = TempDir::new().unwrap();
         let process = Process::new(
             "test-process".to_string(),
@@ -161,10 +193,13 @@ mod tests {
             temp_dir.path().to_string_lossy().to_string(),
             "env-1".to_string(),
         );
-        
-        scheduler.schedule_process_shutdown(&process.id, Duration::from_secs(60)).await.unwrap();
+
+        scheduler
+            .schedule_process_shutdown(&process.id, Duration::from_secs(60))
+            .await
+            .unwrap();
         assert_eq!(scheduler.shutdown_timers.read().await.len(), 1);
-        
+
         scheduler.cancel_shutdown(&process.id).await;
         assert_eq!(scheduler.shutdown_timers.read().await.len(), 0);
     }
@@ -173,11 +208,11 @@ mod tests {
 use crate::config::GlobalConfig;
 use crate::error::Result;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::{mpsc, RwLock};
-use tokio::time::{interval, sleep, Instant};
+use tokio::sync::{RwLock, mpsc};
+use tokio::time::{Instant, interval, sleep};
 
 #[derive(Debug, Clone)]
 pub struct ActivityInfo {
@@ -247,7 +282,11 @@ impl ActivityTracker {
             .unwrap_or(true) // No activity recorded = inactive
     }
 
-    pub async fn check_environment_inactivity(&self, environment_id: &str, timeout: Duration) -> bool {
+    pub async fn check_environment_inactivity(
+        &self,
+        environment_id: &str,
+        timeout: Duration,
+    ) -> bool {
         let activities = self.environment_activities.read().await;
         activities
             .get(environment_id)
@@ -335,8 +374,10 @@ impl InactivityScheduler {
         let activity_tracker = self.activity_tracker.process_activities.clone();
         let env_tracker = self.activity_tracker.environment_activities.clone();
         let is_running = self.is_running.clone();
-        let cleanup_interval = Duration::from_secs(self.global_config.process.cleanup_interval as u64);
-        let max_activity_age = Duration::from_secs(self.global_config.process.max_activity_age as u64);
+        let cleanup_interval =
+            Duration::from_secs(self.global_config.process.cleanup_interval as u64);
+        let max_activity_age =
+            Duration::from_secs(self.global_config.process.max_activity_age as u64);
 
         tokio::spawn(async move {
             let mut interval_timer = interval(cleanup_interval);
@@ -402,14 +443,22 @@ impl InactivityScheduler {
     }
 
     pub async fn record_process_activity(&self, process_id: &str) {
-        self.activity_tracker.record_process_activity(process_id).await;
+        self.activity_tracker
+            .record_process_activity(process_id)
+            .await;
     }
 
     pub async fn record_environment_activity(&self, environment_id: &str) {
-        self.activity_tracker.record_environment_activity(environment_id).await;
+        self.activity_tracker
+            .record_environment_activity(environment_id)
+            .await;
     }
 
-    pub async fn schedule_process_shutdown(&mut self, process_id: &str, delay: Duration) -> Result<()> {
+    pub async fn schedule_process_shutdown(
+        &mut self,
+        process_id: &str,
+        delay: Duration,
+    ) -> Result<()> {
         // Cancel existing timer if any
         {
             let mut timers = self.shutdown_timers.write().await;
@@ -428,11 +477,11 @@ impl InactivityScheduler {
                 _ = sleep(delay) => {
                     // Timeout reached - trigger shutdown
                     println!("Process {process_id_clone} scheduled for shutdown due to inactivity");
-                    
+
                     // Remove ourselves from the timers map
                     let mut timers = timers_clone.write().await;
                     timers.remove(&process_id_clone);
-                    
+
                     // TODO: Trigger actual process shutdown through callback/channel
                 }
                 _ = shutdown_rx.recv() => {
@@ -451,7 +500,11 @@ impl InactivityScheduler {
         Ok(())
     }
 
-    pub async fn schedule_environment_shutdown(&mut self, environment_id: &str, delay: Duration) -> Result<()> {
+    pub async fn schedule_environment_shutdown(
+        &mut self,
+        environment_id: &str,
+        delay: Duration,
+    ) -> Result<()> {
         // Cancel existing timer if any
         {
             let mut timers = self.shutdown_timers.write().await;
@@ -470,11 +523,11 @@ impl InactivityScheduler {
                 _ = sleep(delay) => {
                     // Timeout reached - trigger shutdown
                     println!("Environment {env_id_clone} scheduled for shutdown due to inactivity");
-                    
+
                     // Remove ourselves from the timers map
                     let mut timers = timers_clone.write().await;
                     timers.remove(&env_id_clone);
-                    
+
                     // TODO: Trigger actual environment shutdown through callback/channel
                 }
                 _ = shutdown_rx.recv() => {
@@ -501,22 +554,32 @@ impl InactivityScheduler {
     }
 
     pub async fn check_and_schedule_shutdowns(&mut self) -> Result<()> {
-        let process_timeout = Duration::from_secs(self.global_config.process.inactivity_timeout as u64);
-        let environment_timeout = Duration::from_secs(self.global_config.environment.inactivity_timeout as u64);
+        let process_timeout =
+            Duration::from_secs(self.global_config.process.inactivity_timeout as u64);
+        let environment_timeout =
+            Duration::from_secs(self.global_config.environment.inactivity_timeout as u64);
 
         // Check for inactive processes
-        let inactive_processes = self.activity_tracker.get_all_inactive_processes(process_timeout).await;
+        let inactive_processes = self
+            .activity_tracker
+            .get_all_inactive_processes(process_timeout)
+            .await;
         for process_id in inactive_processes {
             if !self.is_shutdown_scheduled(&process_id).await {
-                self.schedule_process_shutdown(&process_id, Duration::from_secs(0)).await?;
+                self.schedule_process_shutdown(&process_id, Duration::from_secs(0))
+                    .await?;
             }
         }
 
         // Check for inactive environments
-        let inactive_environments = self.activity_tracker.get_all_inactive_environments(environment_timeout).await;
+        let inactive_environments = self
+            .activity_tracker
+            .get_all_inactive_environments(environment_timeout)
+            .await;
         for env_id in inactive_environments {
             if !self.is_shutdown_scheduled(&env_id).await {
-                self.schedule_environment_shutdown(&env_id, Duration::from_secs(0)).await?;
+                self.schedule_environment_shutdown(&env_id, Duration::from_secs(0))
+                    .await?;
             }
         }
 

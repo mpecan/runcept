@@ -33,9 +33,21 @@ mod tests {
     #[test]
     fn test_logs_command_parsing() {
         // Test logs with follow
-        let args = CliArgs::try_parse_from(&["runcept", "logs", "web-server", "--follow", "--lines", "50"]).unwrap();
+        let args = CliArgs::try_parse_from(&[
+            "runcept",
+            "logs",
+            "web-server",
+            "--follow",
+            "--lines",
+            "50",
+        ])
+        .unwrap();
         match args.command {
-            Commands::Logs { name, follow, lines } => {
+            Commands::Logs {
+                name,
+                follow,
+                lines,
+            } => {
                 assert_eq!(name, "web-server");
                 assert!(follow);
                 assert_eq!(lines, Some(50));
@@ -49,24 +61,20 @@ mod tests {
         // Test daemon start
         let args = CliArgs::try_parse_from(&["runcept", "daemon", "start"]).unwrap();
         match args.command {
-            Commands::Daemon { action } => {
-                match action {
-                    DaemonAction::Start { foreground: _ } => {}
-                    _ => panic!("Expected Start action"),
-                }
-            }
+            Commands::Daemon { action } => match action {
+                DaemonAction::Start { foreground: _ } => {}
+                _ => panic!("Expected Start action"),
+            },
             _ => panic!("Expected Daemon command"),
         }
 
         // Test daemon status
         let args = CliArgs::try_parse_from(&["runcept", "daemon", "status"]).unwrap();
         match args.command {
-            Commands::Daemon { action } => {
-                match action {
-                    DaemonAction::Status => {}
-                    _ => panic!("Expected Status action"),
-                }
-            }
+            Commands::Daemon { action } => match action {
+                DaemonAction::Status => {}
+                _ => panic!("Expected Status action"),
+            },
             _ => panic!("Expected Daemon command"),
         }
     }
@@ -98,7 +106,7 @@ pub struct CliArgs {
 pub enum Commands {
     /// Environment management commands
     #[group(id = "environment")]
-    
+
     /// Activate a project environment from .runcept.toml
     Activate {
         /// Path to project directory (defaults to current directory)
@@ -113,7 +121,7 @@ pub enum Commands {
 
     /// Process management commands
     #[group(id = "process")]
-    
+
     /// Start a specific process in the current environment
     Start {
         /// Name of the process to start
@@ -149,7 +157,7 @@ pub enum Commands {
 
     /// Global commands
     #[group(id = "global")]
-    
+
     /// List all processes across all environments
     Ps,
 
@@ -288,9 +296,7 @@ impl From<DaemonResponse> for CliResult {
             DaemonResponse::ProcessList(processes) => {
                 CliResult::Success(format_process_list(processes))
             }
-            DaemonResponse::ProcessLogs(logs) => {
-                CliResult::Success(format_logs(logs))
-            }
+            DaemonResponse::ProcessLogs(logs) => CliResult::Success(format_logs(logs)),
             DaemonResponse::DaemonStatus(status) => {
                 CliResult::Success(format_daemon_status(status))
             }
@@ -300,7 +306,7 @@ impl From<DaemonResponse> for CliResult {
 
 fn format_environment_status(status: EnvironmentStatusResponse) -> String {
     let mut output = String::new();
-    
+
     if let Some(env) = &status.active_environment {
         output.push_str(&format!("Active Environment: {env}\n"));
         if let Some(path) = &status.project_path {
@@ -309,17 +315,17 @@ fn format_environment_status(status: EnvironmentStatusResponse) -> String {
     } else {
         output.push_str("No active environment\n");
     }
-    
+
     output.push_str(&format!(
         "Processes: {}/{} running\n",
         status.running_processes, status.total_processes
     ));
-    
+
     if !status.processes.is_empty() {
         output.push('\n');
         output.push_str(&format_process_list(status.processes));
     }
-    
+
     output
 }
 
@@ -331,7 +337,7 @@ fn format_process_list(processes: Vec<ProcessInfo>) -> String {
     let mut output = String::new();
     output.push_str("PROCESS         STATUS    PID      UPTIME      ENVIRONMENT\n");
     output.push_str("-------         ------    ---      ------      -----------\n");
-    
+
     for process in processes {
         output.push_str(&format!(
             "{:<15} {:<9} {:<8} {:<11} {}\n",
@@ -342,7 +348,7 @@ fn format_process_list(processes: Vec<ProcessInfo>) -> String {
             process.environment
         ));
     }
-    
+
     output
 }
 
@@ -353,35 +359,44 @@ fn format_logs(logs: LogsResponse) -> String {
 
     let mut output = String::new();
     output.push_str(&format!("==> Logs for {} <==\n", logs.process_name));
-    
+
     let lines_len = logs.lines.len();
     for line in logs.lines {
-        output.push_str(&format!("[{}] {}: {}\n", line.timestamp, line.level, line.message));
+        output.push_str(&format!(
+            "[{}] {}: {}\n",
+            line.timestamp, line.level, line.message
+        ));
     }
-    
+
     if logs.total_lines > lines_len {
         output.push_str(&format!(
             "\n... {} more lines available (use --lines to see more)\n",
             logs.total_lines - lines_len
         ));
     }
-    
+
     output
 }
 
 fn format_daemon_status(status: DaemonStatusResponse) -> String {
     let mut output = String::new();
-    
-    output.push_str(&format!("Daemon Status: {}\n", if status.running { "Running" } else { "Stopped" }));
+
+    output.push_str(&format!(
+        "Daemon Status: {}\n",
+        if status.running { "Running" } else { "Stopped" }
+    ));
     output.push_str(&format!("Version: {}\n", status.version));
     output.push_str(&format!("Uptime: {}\n", status.uptime));
     output.push_str(&format!("Socket: {}\n", status.socket_path));
-    output.push_str(&format!("Active Environments: {}\n", status.active_environments));
+    output.push_str(&format!(
+        "Active Environments: {}\n",
+        status.active_environments
+    ));
     output.push_str(&format!("Total Processes: {}\n", status.total_processes));
-    
+
     if let Some(memory) = status.memory_usage {
-        output.push_str(&format!("Memory Usage: {}\n", memory));
+        output.push_str(&format!("Memory Usage: {memory}\n"));
     }
-    
+
     output
 }

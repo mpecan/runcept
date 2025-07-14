@@ -8,7 +8,7 @@ mod tests {
     async fn test_cli_handler_creation() {
         let temp_dir = TempDir::new().unwrap();
         let socket_path = temp_dir.path().join("test.sock");
-        
+
         let handler = CliHandler::new(Some(socket_path.clone()));
         assert_eq!(handler.client.socket_path, socket_path);
     }
@@ -19,9 +19,11 @@ mod tests {
         let args = CliArgs {
             verbose: false,
             socket: None,
-            command: Commands::Activate { path: Some("/test".to_string()) },
+            command: Commands::Activate {
+                path: Some("/test".to_string()),
+            },
         };
-        
+
         let request = CliHandler::command_to_request(&args.command).unwrap();
         match request {
             DaemonRequest::ActivateEnvironment { path } => {
@@ -34,9 +36,11 @@ mod tests {
         let args = CliArgs {
             verbose: false,
             socket: None,
-            command: Commands::Start { name: "web-server".to_string() },
+            command: Commands::Start {
+                name: "web-server".to_string(),
+            },
         };
-        
+
         let request = CliHandler::command_to_request(&args.command).unwrap();
         match request {
             DaemonRequest::StartProcess { name } => {
@@ -51,9 +55,11 @@ mod tests {
         let args = CliArgs {
             verbose: false,
             socket: None,
-            command: Commands::Daemon { action: DaemonAction::Start { foreground: false } },
+            command: Commands::Daemon {
+                action: DaemonAction::Start { foreground: false },
+            },
         };
-        
+
         // Daemon commands should not be converted to requests
         let result = CliHandler::command_to_request(&args.command);
         assert!(result.is_none());
@@ -61,7 +67,7 @@ mod tests {
 }
 
 use crate::cli::client::{DaemonClient, check_daemon_connection};
-use crate::cli::commands::{CliArgs, Commands, DaemonAction, DaemonRequest, CliResult};
+use crate::cli::commands::{CliArgs, CliResult, Commands, DaemonAction, DaemonRequest};
 use crate::error::{Result, RunceptError};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -104,7 +110,7 @@ impl CliHandler {
         match &args.command {
             // Daemon management commands are handled locally
             Commands::Daemon { action } => self.handle_daemon_command(action).await,
-            
+
             // All other commands require daemon communication
             _ => self.handle_daemon_request(&args.command).await,
         }
@@ -151,26 +157,22 @@ impl CliHandler {
     fn command_to_request(command: &Commands) -> Option<DaemonRequest> {
         match command {
             // Environment commands
-            Commands::Activate { path } => Some(DaemonRequest::ActivateEnvironment { 
-                path: path.clone() 
-            }),
+            Commands::Activate { path } => {
+                Some(DaemonRequest::ActivateEnvironment { path: path.clone() })
+            }
             Commands::Deactivate => Some(DaemonRequest::DeactivateEnvironment),
             Commands::Status => Some(DaemonRequest::GetEnvironmentStatus),
 
             // Process commands
-            Commands::Start { name } => Some(DaemonRequest::StartProcess { 
-                name: name.clone() 
-            }),
-            Commands::Stop { name } => Some(DaemonRequest::StopProcess { 
-                name: name.clone() 
-            }),
-            Commands::Restart { name } => Some(DaemonRequest::RestartProcess { 
-                name: name.clone() 
-            }),
+            Commands::Start { name } => Some(DaemonRequest::StartProcess { name: name.clone() }),
+            Commands::Stop { name } => Some(DaemonRequest::StopProcess { name: name.clone() }),
+            Commands::Restart { name } => {
+                Some(DaemonRequest::RestartProcess { name: name.clone() })
+            }
             Commands::List => Some(DaemonRequest::ListProcesses),
-            Commands::Logs { name, lines, .. } => Some(DaemonRequest::GetProcessLogs { 
-                name: name.clone(), 
-                lines: *lines 
+            Commands::Logs { name, lines, .. } => Some(DaemonRequest::GetProcessLogs {
+                name: name.clone(),
+                lines: *lines,
             }),
 
             // Global commands
@@ -194,8 +196,9 @@ impl CliHandler {
         }
 
         // Get current executable path
-        let current_exe = std::env::current_exe()
-            .map_err(|e| RunceptError::ProcessError(format!("Failed to get current executable: {e}")))?;
+        let current_exe = std::env::current_exe().map_err(|e| {
+            RunceptError::ProcessError(format!("Failed to get current executable: {e}"))
+        })?;
 
         let mut cmd = Command::new(&current_exe);
         cmd.arg("daemon-process") // Special internal command for daemon process
@@ -213,14 +216,17 @@ impl CliHandler {
             cmd.arg("--verbose");
         }
 
-        let child = cmd.spawn()
+        let child = cmd
+            .spawn()
             .map_err(|e| RunceptError::ProcessError(format!("Failed to start daemon: {e}")))?;
 
         if foreground {
             // Wait for process in foreground mode
-            let status = child.wait_with_output().await
+            let status = child
+                .wait_with_output()
+                .await
                 .map_err(|e| RunceptError::ProcessError(format!("Daemon process failed: {e}")))?;
-                
+
             if status.status.success() {
                 Ok(CliResult::Success("Daemon stopped".to_string()))
             } else {
@@ -228,9 +234,17 @@ impl CliHandler {
             }
         } else {
             // Wait for daemon to be ready
-            match self.client.wait_for_daemon(std::time::Duration::from_secs(10)).await {
-                Ok(_) => Ok(CliResult::Success("Daemon started successfully".to_string())),
-                Err(_) => Ok(CliResult::Error("Daemon failed to start within timeout".to_string())),
+            match self
+                .client
+                .wait_for_daemon(std::time::Duration::from_secs(10))
+                .await
+            {
+                Ok(_) => Ok(CliResult::Success(
+                    "Daemon started successfully".to_string(),
+                )),
+                Err(_) => Ok(CliResult::Error(
+                    "Daemon failed to start within timeout".to_string(),
+                )),
             }
         }
     }
@@ -242,7 +256,9 @@ impl CliHandler {
         }
 
         match self.client.shutdown_daemon().await {
-            Ok(_) => Ok(CliResult::Success("Daemon stopped successfully".to_string())),
+            Ok(_) => Ok(CliResult::Success(
+                "Daemon stopped successfully".to_string(),
+            )),
             Err(e) => Ok(CliResult::Error(format!("Failed to stop daemon: {e}"))),
         }
     }
@@ -267,7 +283,9 @@ impl CliHandler {
             }
 
             if self.client.is_daemon_running().await {
-                return Ok(CliResult::Error("Daemon failed to stop within timeout".to_string()));
+                return Ok(CliResult::Error(
+                    "Daemon failed to stop within timeout".to_string(),
+                ));
             }
         }
 
@@ -283,7 +301,9 @@ impl CliHandler {
 
         match self.client.get_daemon_status().await {
             Ok(response) => Ok(response.into()),
-            Err(e) => Ok(CliResult::Error(format!("Failed to get daemon status: {e}"))),
+            Err(e) => Ok(CliResult::Error(format!(
+                "Failed to get daemon status: {e}"
+            ))),
         }
     }
 }

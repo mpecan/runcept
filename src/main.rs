@@ -1,10 +1,21 @@
 use clap::Parser;
 use runcept::cli::{CliArgs, CliHandler, CliResult};
+use runcept::config::GlobalConfig;
+use runcept::daemon::{DaemonServer, ServerConfig};
+use std::path::PathBuf;
 use std::process;
 
 #[tokio::main]
 async fn main() {
-    // Parse command line arguments
+    let args: Vec<String> = std::env::args().collect();
+
+    // Check if this is a daemon process invocation
+    if args.len() > 1 && args[1] == "daemon-process" {
+        run_daemon_process(args).await;
+        return;
+    }
+
+    // Parse command line arguments for regular CLI
     let args = CliArgs::parse();
 
     // Create CLI handler
@@ -26,5 +37,92 @@ async fn main() {
             eprintln!("{msg}");
             process::exit(1);
         }
+    }
+}
+
+/// Run the daemon process
+async fn run_daemon_process(args: Vec<String>) {
+    let mut socket_path: Option<PathBuf> = None;
+    let mut verbose = false;
+
+    // Parse daemon arguments
+    let mut i = 2; // Skip program name and "daemon-process"
+    while i < args.len() {
+        match args[i].as_str() {
+            "--socket" => {
+                if i + 1 < args.len() {
+                    socket_path = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else {
+                    eprintln!("Error: --socket requires a path argument");
+                    process::exit(1);
+                }
+            }
+            "--verbose" => {
+                verbose = true;
+                i += 1;
+            }
+            _ => {
+                eprintln!("Error: Unknown daemon argument: {}", args[i]);
+                process::exit(1);
+            }
+        }
+    }
+
+    // Use default socket path if not provided
+    let socket_path = socket_path.unwrap_or_else(runcept::cli::client::get_default_socket_path);
+
+    if verbose {
+        println!("Starting daemon with socket: {socket_path:?}");
+    }
+
+    // Load global configuration
+    let global_config = match GlobalConfig::load().await {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Failed to load global configuration: {e}");
+            process::exit(1);
+        }
+    };
+
+    // Create server configuration
+    let server_config = ServerConfig {
+        socket_path,
+        global_config,
+    };
+
+    // Create and run daemon server
+    let mut server = match DaemonServer::new(server_config).await {
+        Ok(server) => server,
+        Err(e) => {
+            eprintln!("Failed to create daemon server: {e}");
+            process::exit(1);
+        }
+    };
+
+    if verbose {
+        println!("Daemon server created successfully");
+    }
+
+    // Set up signal handling for graceful shutdown
+    let server_handle = server.clone_handles();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to listen for Ctrl+C");
+        println!("Received Ctrl+C, shutting down...");
+        if let Err(e) = server_handle.request_shutdown().await {
+            eprintln!("Error during shutdown: {e}");
+        }
+    });
+
+    // Run the server
+    if let Err(e) = server.run().await {
+        eprintln!("Daemon server error: {e}");
+        process::exit(1);
+    }
+
+    if verbose {
+        println!("Daemon stopped");
     }
 }

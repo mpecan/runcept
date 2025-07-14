@@ -315,7 +315,6 @@ impl Default for LoggingConfig {
     }
 }
 
-
 impl GlobalConfig {
     pub async fn load() -> Result<Self> {
         let config_dir = get_config_dir()?;
