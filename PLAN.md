@@ -2,9 +2,53 @@
 
 ## Project Overview
 
-Build a Rust-based process manager with dual interfaces:
-1. **MCP Server**: Provides AI assistants with process management capabilities
-2. **CLI Interface**: Direct command-line process management
+Build a Rust-based process manager with dual interfaces and project-based configuration:
+1. **MCP Server**: Provides AI assistants with process and environment management capabilities
+2. **CLI Interface**: Direct command-line process and environment management
+3. **Project Configuration**: `.runit.toml` files define project-specific processes
+4. **Environment Activation**: Activate/deactivate entire project environments
+5. **Auto-shutdown**: Configurable inactivity timeouts for resource management
+
+## Configuration Format (.runit.toml)
+
+```toml
+[project]
+name = "my-web-app"
+description = "Development environment for web application"
+inactivity_timeout = "30m"  # Auto-shutdown after 30 minutes of inactivity
+working_dir = "."           # Base working directory for all processes
+
+[[process]]
+name = "web-server"
+command = "python manage.py runserver"
+working_dir = "."
+env = { DEBUG = "true", PORT = "8000" }
+auto_restart = true
+health_check = "http://localhost:8000/health"
+health_check_interval = "30s"
+depends_on = ["database"]
+
+[[process]]
+name = "database"
+command = "postgres -D /usr/local/var/postgres"
+working_dir = "."
+auto_restart = true
+health_check = "tcp://localhost:5432"
+
+[[process]]
+name = "redis"
+command = "redis-server"
+working_dir = "."
+auto_restart = true
+health_check = "tcp://localhost:6379"
+
+[[process]]
+name = "worker"
+command = "celery worker -A app.celery"
+working_dir = "."
+depends_on = ["redis", "database"]
+auto_restart = true
+```
 
 ## Architecture Design
 
@@ -18,95 +62,186 @@ src/
 │   ├── mod.rs          # Module exports
 │   ├── manager.rs      # ProcessManager - lifecycle management
 │   ├── process.rs      # Process struct and state
-│   └── storage.rs      # Persistence layer (JSON/file-based)
+│   └── monitor.rs      # Process monitoring and health checks
+├── config/             # Configuration system
+│   ├── mod.rs          # Module exports
+│   ├── project.rs      # .runit.toml parsing and validation
+│   ├── environment.rs  # Environment activation/deactivation
+│   └── settings.rs     # Global settings and defaults
+├── database/           # SQLite persistence layer
+│   ├── mod.rs          # Module exports
+│   ├── schema.rs       # Database schema definitions
+│   ├── migrations.rs   # Database migrations
+│   └── queries.rs      # Database operations
 ├── mcp/                # MCP server implementation
 │   ├── mod.rs          # Module exports
 │   ├── server.rs       # MCP protocol handler
-│   └── tools.rs        # MCP tool implementations
+│   ├── tools.rs        # MCP tool implementations
+│   └── environment_tools.rs # Environment-specific MCP tools
 ├── cli/                # Command line interface
 │   ├── mod.rs          # Module exports
-│   └── commands.rs     # CLI command handlers
-├── error.rs            # Error types and handling
-└── config.rs           # Configuration management
+│   ├── commands.rs     # CLI command handlers
+│   └── environment_commands.rs # Environment-specific CLI commands
+├── scheduler/          # Auto-shutdown and monitoring
+│   ├── mod.rs          # Module exports
+│   ├── inactivity.rs   # Inactivity tracking and auto-shutdown
+│   └── health.rs       # Health check scheduling
+└── error.rs            # Error types and handling
 ```
 
-## Implementation Phases
+## Implementation Phases (TDD Approach)
 
 ### Phase 1: Core Foundation
 1. **Error Handling System** (`error.rs`)
-   - Custom error types for different failure modes
-   - Error conversion traits
-   - User-friendly error messages
+   - Write tests for error types and conversions
+   - Implement custom error types for different failure modes
+   - Implement error conversion traits and user-friendly messages
 
-2. **Configuration Management** (`config.rs`)
-   - Default storage locations
-   - Process configuration validation
-   - Environment variable support
+2. **Database Layer** (`database/`)
+   - Write tests for database operations and migrations
+   - Implement SQLite database setup with migrations
+   - Implement schema for processes, environments, and activity tracking
+   - Implement database operations and connection management
 
 3. **Process Representation** (`process/process.rs`)
-   - Process struct with metadata
-   - Process state enum (Running, Stopped, Failed, etc.)
-   - Serialization support
+   - Write tests for process struct and state transitions
+   - Implement process struct with metadata
+   - Implement process state enum (Running, Stopped, Failed, etc.)
+   - Implement serialization support
 
-### Phase 2: Process Management
-4. **Storage Layer** (`process/storage.rs`)
-   - JSON-based process persistence
-   - Atomic file operations
-   - Process registry management
+### Phase 2: Configuration System
+4. **Project Configuration** (`config/project.rs`)
+   - Write tests for .runit.toml parsing and validation
+   - Implement .runit.toml parsing and validation
+   - Write tests for process dependency resolution
+   - Implement process dependency resolution
+   - Write tests for environment variable handling
+   - Implement environment variable handling
 
-5. **Process Manager** (`process/manager.rs`)
-   - Process lifecycle operations (start, stop, restart)
-   - Signal handling and cleanup
-   - Log capture and management
-   - Process monitoring and health checks
+5. **Environment Management** (`config/environment.rs`)
+   - Write tests for environment activation/deactivation
+   - Implement environment activation/deactivation logic
+   - Write tests for project discovery and registration
+   - Implement project discovery and registration
+   - Write tests for global settings management
+   - Implement global settings management
 
-### Phase 3: Interfaces
-6. **CLI Implementation** (`cli/commands.rs`)
-   - Command parsing with clap
-   - Interactive command handlers
-   - Output formatting and error display
+### Phase 3: Process Management
+6. **Process Manager** (`process/manager.rs`)
+   - Write tests for process lifecycle operations
+   - Implement process lifecycle operations (start, stop, restart)
+   - Write tests for signal handling and cleanup
+   - Implement signal handling and cleanup
+   - Write tests for dependency management
+   - Implement dependency management
+   - Write tests for log capture and management
+   - Implement log capture and management
 
-7. **MCP Server** (`mcp/server.rs`, `mcp/tools.rs`)
-   - MCP protocol implementation
-   - Tool registration and dispatch
-   - Async request/response handling
+7. **Process Monitoring** (`process/monitor.rs`)
+   - Write tests for health check execution
+   - Implement health check execution
+   - Write tests for process status tracking
+   - Implement process status tracking
+   - Write tests for crash detection and auto-restart
+   - Implement crash detection and auto-restart
 
-### Phase 4: Testing & Quality
-8. **Unit Tests**
-   - Test each module in isolation
-   - Mock external dependencies
-   - Achieve >90% code coverage
+### Phase 4: Scheduling & Auto-shutdown
+8. **Inactivity Tracking** (`scheduler/inactivity.rs`)
+   - Write tests for activity monitoring
+   - Implement activity monitoring per process and environment
+   - Write tests for configurable timeout handling
+   - Implement configurable timeout handling
+   - Write tests for graceful shutdown sequences
+   - Implement graceful shutdown sequences
 
-9. **Integration Tests**
-   - End-to-end CLI testing
-   - MCP server functionality testing
-   - Process lifecycle testing
+9. **Health Monitoring** (`scheduler/health.rs`)
+   - Write tests for periodic health check execution
+   - Implement periodic health check execution
+   - Write tests for health status reporting
+   - Implement health status reporting
+   - Write tests for failure notification system
+   - Implement failure notification system
+
+### Phase 5: Interfaces
+10. **CLI Implementation** (`cli/`)
+    - Write tests for environment commands
+    - Implement environment commands (activate, deactivate, status)
+    - Write tests for process commands with environment awareness
+    - Implement process commands with environment awareness
+    - Write tests for interactive command handlers
+    - Implement interactive command handlers
+
+11. **MCP Server** (`mcp/`)
+    - Write tests for MCP protocol implementation
+    - Implement MCP protocol implementation
+    - Write tests for environment management tools
+    - Implement environment management tools
+    - Write tests for process management tools
+    - Implement process management tools
+    - Write tests for activity tracking integration
+    - Implement activity tracking integration
+
+### Phase 6: Integration & End-to-End Testing
+12. **Integration Tests**
+    - End-to-end environment lifecycle testing
+    - MCP server functionality testing
+    - Auto-shutdown behavior testing
+    - Cross-component interaction testing
 
 ## Key Features to Implement
+
+### Configuration System
+- **.runit.toml Files**: Project-specific process definitions
+- **Environment Activation**: Activate/deactivate entire project environments
+- **Process Dependencies**: Define startup order and dependencies
+- **Auto-shutdown**: Configurable inactivity timeouts
+- **Health Checks**: HTTP/TCP/command-based health monitoring
+- **Global Settings**: User-wide configuration and defaults
 
 ### Process Management
 - **Start Process**: Launch with command, arguments, environment
 - **Stop Process**: Graceful shutdown with SIGTERM, force with SIGKILL
-- **Restart Process**: Stop and start cycle
+- **Restart Process**: Stop and start cycle with dependency handling
 - **List Processes**: Show all managed processes with status
 - **Process Status**: Detailed information (PID, uptime, memory, etc.)
 - **Log Management**: Capture stdout/stderr, log rotation
+- **Activity Tracking**: Monitor process activity for auto-shutdown
 
 ### MCP Tools
-- `start_process`: Start a new managed process
-- `stop_process`: Stop a running process  
+**Environment Management:**
+- `activate_environment`: Activate a project environment from .runit.toml
+- `deactivate_environment`: Deactivate current environment
+- `list_environments`: List all available project environments
+- `get_environment_status`: Get detailed environment status
+
+**Process Management:**
+- `start_process`: Start a specific process in the current environment
+- `stop_process`: Stop a running process
 - `restart_process`: Restart a process
-- `list_processes`: List all managed processes
+- `list_processes`: List all processes in current environment
 - `get_process_logs`: Retrieve process logs
 - `get_process_status`: Get detailed process status
 
+**Global Operations:**
+- `list_all_processes`: List processes across all environments
+- `kill_all_processes`: Emergency stop all processes
+
 ### CLI Commands
-- `runit start --name <name> --command <cmd> [--env KEY=VALUE]`
-- `runit stop <name>`
-- `runit restart <name>`
-- `runit list`
-- `runit status <name>`
-- `runit logs <name> [--follow] [--lines N]`
+**Environment Commands:**
+- `runit activate [path]`: Activate project environment
+- `runit deactivate`: Deactivate current environment
+- `runit status`: Show environment and process status
+
+**Process Commands:**
+- `runit start <name>`: Start a specific process
+- `runit stop <name>`: Stop a specific process
+- `runit restart <name>`: Restart a specific process
+- `runit list`: List processes in current environment
+- `runit logs <name> [--follow] [--lines N]`: View process logs
+
+**Global Commands:**
+- `runit ps`: List all processes across all environments
+- `runit kill-all`: Stop all processes in all environments
 
 ## Technical Considerations
 
