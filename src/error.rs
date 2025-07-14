@@ -37,7 +37,8 @@ mod tests {
 
     #[test]
     fn test_error_is_retriable() {
-        let io_error = RunItError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
+        let io_error =
+            RunItError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
         assert!(io_error.is_retriable());
 
         let config_error = RunItError::ConfigError("test".to_string());
@@ -102,12 +103,12 @@ impl RunItError {
     pub fn is_retriable(&self) -> bool {
         matches!(
             self,
-            RunItError::IoError(_) |
-            RunItError::HttpError(_) |
-            RunItError::DatabaseError(_) |
-            RunItError::SqlError(_) |
-            RunItError::MigrationError(_) |
-            RunItError::TimeoutError(_)
+            RunItError::IoError(_)
+                | RunItError::HttpError(_)
+                | RunItError::DatabaseError(_)
+                | RunItError::SqlError(_)
+                | RunItError::MigrationError(_)
+                | RunItError::TimeoutError(_)
         )
     }
 

@@ -1,6 +1,6 @@
-pub mod error;
-pub mod database;
-pub mod process;
 pub mod config;
+pub mod database;
+pub mod error;
+pub mod process;
 
-pub use error::{RunItError, Result};
+pub use error::{Result, RunItError};

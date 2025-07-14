@@ -14,7 +14,7 @@ mod tests {
     async fn test_get_current_version() {
         let db = Database::new("sqlite::memory:").await.unwrap();
         db.init().await.unwrap();
-        
+
         let manager = MigrationManager::new(db.get_pool());
         let version = manager.get_current_version().await;
         assert!(version.is_ok());
@@ -24,11 +24,11 @@ mod tests {
     async fn test_migration_info() {
         let db = Database::new("sqlite::memory:").await.unwrap();
         db.init().await.unwrap();
-        
+
         let manager = MigrationManager::new(db.get_pool());
         let info = manager.get_migration_info().await;
         assert!(info.is_ok());
-        
+
         let migrations = info.unwrap();
         assert!(!migrations.is_empty());
     }
@@ -37,7 +37,7 @@ mod tests {
     async fn test_validate_schema() {
         let db = Database::new("sqlite::memory:").await.unwrap();
         db.init().await.unwrap();
-        
+
         let manager = MigrationManager::new(db.get_pool());
         let is_valid = manager.validate_schema().await;
         assert!(is_valid.is_ok());
@@ -45,8 +45,8 @@ mod tests {
     }
 }
 
-use sqlx::{Pool, Sqlite, Row};
 use crate::error::Result;
+use sqlx::{Pool, Row, Sqlite};
 
 pub struct MigrationManager<'a> {
     pool: &'a Pool<Sqlite>,
@@ -68,9 +68,10 @@ impl<'a> MigrationManager<'a> {
     }
 
     pub async fn get_current_version(&self) -> Result<i64> {
-        let result = sqlx::query("SELECT version FROM _sqlx_migrations ORDER BY version DESC LIMIT 1")
-            .fetch_optional(self.pool)
-            .await?;
+        let result =
+            sqlx::query("SELECT version FROM _sqlx_migrations ORDER BY version DESC LIMIT 1")
+                .fetch_optional(self.pool)
+                .await?;
 
         match result {
             Some(row) => Ok(row.get("version")),
@@ -101,13 +102,14 @@ impl<'a> MigrationManager<'a> {
     pub async fn validate_schema(&self) -> Result<bool> {
         // Check if all required tables exist
         let required_tables = vec!["environments", "processes", "activity_logs"];
-        
+
         for table in required_tables {
-            let result = sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
-                .bind(table)
-                .fetch_optional(self.pool)
-                .await?;
-            
+            let result =
+                sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_optional(self.pool)
+                    .await?;
+
             if result.is_none() {
                 return Ok(false);
             }
@@ -122,11 +124,12 @@ impl<'a> MigrationManager<'a> {
         ];
 
         for index in required_indexes {
-            let result = sqlx::query("SELECT name FROM sqlite_master WHERE type='index' AND name=?")
-                .bind(index)
-                .fetch_optional(self.pool)
-                .await?;
-            
+            let result =
+                sqlx::query("SELECT name FROM sqlite_master WHERE type='index' AND name=?")
+                    .bind(index)
+                    .fetch_optional(self.pool)
+                    .await?;
+
             if result.is_none() {
                 return Ok(false);
             }
@@ -137,11 +140,19 @@ impl<'a> MigrationManager<'a> {
 
     pub async fn reset_database(&self) -> Result<()> {
         // Drop all tables in reverse order to handle foreign key constraints
-        sqlx::query("DROP TABLE IF EXISTS activity_logs").execute(self.pool).await?;
-        sqlx::query("DROP TABLE IF EXISTS processes").execute(self.pool).await?;
-        sqlx::query("DROP TABLE IF EXISTS environments").execute(self.pool).await?;
-        sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations").execute(self.pool).await?;
-        
+        sqlx::query("DROP TABLE IF EXISTS activity_logs")
+            .execute(self.pool)
+            .await?;
+        sqlx::query("DROP TABLE IF EXISTS processes")
+            .execute(self.pool)
+            .await?;
+        sqlx::query("DROP TABLE IF EXISTS environments")
+            .execute(self.pool)
+            .await?;
+        sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations")
+            .execute(self.pool)
+            .await?;
+
         Ok(())
     }
 }

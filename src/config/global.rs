@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::env;
+    use tempfile::TempDir;
 
     #[test]
     fn test_global_config_default() {
         let config = GlobalConfig::default();
-        
+
         assert_eq!(config.database.connection_timeout, 30);
         assert_eq!(config.database.cleanup_interval_hours, 24);
         assert_eq!(config.database.activity_log_retention_days, 30);
@@ -22,16 +22,22 @@ mod tests {
     #[test]
     fn test_global_config_serialization() {
         let config = GlobalConfig::default();
-        
+
         let toml_str = toml::to_string(&config).unwrap();
         assert!(toml_str.contains("[database]"));
         assert!(toml_str.contains("[process]"));
         assert!(toml_str.contains("[mcp]"));
         assert!(toml_str.contains("[logging]"));
-        
+
         let deserialized: GlobalConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(config.database.connection_timeout, deserialized.database.connection_timeout);
-        assert_eq!(config.process.default_inactivity_timeout, deserialized.process.default_inactivity_timeout);
+        assert_eq!(
+            config.database.connection_timeout,
+            deserialized.database.connection_timeout
+        );
+        assert_eq!(
+            config.process.default_inactivity_timeout,
+            deserialized.process.default_inactivity_timeout
+        );
     }
 
     #[test]
@@ -44,9 +50,9 @@ mod tests {
     async fn test_global_config_load_default_when_missing() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.toml");
-        
+
         let config = GlobalConfig::load_from_path(&config_path).await.unwrap();
-        
+
         // Should be default config when file doesn't exist
         assert_eq!(config.database.connection_timeout, 30);
         assert_eq!(config.process.default_inactivity_timeout, "30m");
@@ -56,14 +62,14 @@ mod tests {
     async fn test_global_config_save_and_load() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.toml");
-        
+
         let mut config = GlobalConfig::default();
         config.database.connection_timeout = 60;
         config.process.default_inactivity_timeout = "1h".to_string();
         config.mcp.port = 4000;
-        
+
         config.save_to_path(&config_path).await.unwrap();
-        
+
         let loaded_config = GlobalConfig::load_from_path(&config_path).await.unwrap();
         assert_eq!(loaded_config.database.connection_timeout, 60);
         assert_eq!(loaded_config.process.default_inactivity_timeout, "1h");
@@ -74,7 +80,7 @@ mod tests {
     async fn test_global_config_partial_load() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.toml");
-        
+
         // Write partial config
         let partial_config = r#"
 [database]
@@ -83,15 +89,17 @@ connection_timeout = 120
 [process]
 default_inactivity_timeout = "2h"
 "#;
-        
-        tokio::fs::write(&config_path, partial_config).await.unwrap();
-        
+
+        tokio::fs::write(&config_path, partial_config)
+            .await
+            .unwrap();
+
         let config = GlobalConfig::load_from_path(&config_path).await.unwrap();
-        
+
         // Should have custom values where specified
         assert_eq!(config.database.connection_timeout, 120);
         assert_eq!(config.process.default_inactivity_timeout, "2h");
-        
+
         // Should have defaults for unspecified values
         assert_eq!(config.database.cleanup_interval_hours, 24); // default
         assert_eq!(config.mcp.port, 3000); // default
@@ -100,18 +108,20 @@ default_inactivity_timeout = "2h"
     #[tokio::test]
     async fn test_global_config_manager() {
         let temp_dir = TempDir::new().unwrap();
-        unsafe { env::set_var("HOME", temp_dir.path()); }
-        
+        unsafe {
+            env::set_var("HOME", temp_dir.path());
+        }
+
         let manager = GlobalConfigManager::new_with_custom_dir(temp_dir.path().join(".runit"));
-        
+
         let config = manager.load().await.unwrap();
         assert_eq!(config.database.connection_timeout, 30); // default
-        
+
         let mut new_config = config.clone();
         new_config.process.default_inactivity_timeout = "45m".to_string();
-        
+
         manager.save(&new_config).await.unwrap();
-        
+
         let reloaded = manager.load().await.unwrap();
         assert_eq!(reloaded.process.default_inactivity_timeout, "45m");
     }
@@ -122,24 +132,30 @@ default_inactivity_timeout = "2h"
         let mut env_vars = std::collections::HashMap::new();
         env_vars.insert("NODE_ENV".to_string(), "production".to_string());
         env_vars.insert("DEBUG".to_string(), "true".to_string());
-        
+
         config.merge_env_vars(&env_vars);
-        
-        assert_eq!(config.global_env_vars.get("NODE_ENV"), Some(&"production".to_string()));
-        assert_eq!(config.global_env_vars.get("DEBUG"), Some(&"true".to_string()));
+
+        assert_eq!(
+            config.global_env_vars.get("NODE_ENV"),
+            Some(&"production".to_string())
+        );
+        assert_eq!(
+            config.global_env_vars.get("DEBUG"),
+            Some(&"true".to_string())
+        );
     }
 
     #[test]
     fn test_config_validation() {
         let mut config = GlobalConfig::default();
-        
+
         // Valid config should pass
         assert!(config.validate().is_ok());
-        
+
         // Invalid timeout should fail
         config.database.connection_timeout = 0;
         assert!(config.validate().is_err());
-        
+
         // Reset and test invalid port
         config = GlobalConfig::default();
         config.mcp.port = 0; // invalid port
@@ -147,10 +163,10 @@ default_inactivity_timeout = "2h"
     }
 }
 
+use crate::error::{Result, RunItError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::error::{RunItError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
@@ -314,10 +330,10 @@ impl GlobalConfig {
 
         let content = tokio::fs::read_to_string(path).await?;
         let config: Self = toml::from_str(&content)?;
-        
+
         // Validate the loaded config
         config.validate()?;
-        
+
         Ok(config)
     }
 
@@ -334,8 +350,8 @@ impl GlobalConfig {
         }
 
         let content = toml::to_string_pretty(self)
-            .map_err(|e| RunItError::ConfigError(format!("Failed to serialize config: {}", e)))?;
-        
+            .map_err(|e| RunItError::ConfigError(format!("Failed to serialize config: {e}")))?;
+
         tokio::fs::write(path, content).await?;
         Ok(())
     }
@@ -343,18 +359,25 @@ impl GlobalConfig {
     pub fn validate(&self) -> Result<()> {
         // Validate database config
         if self.database.connection_timeout == 0 {
-            return Err(RunItError::ConfigError("Database connection timeout must be greater than 0".to_string()));
+            return Err(RunItError::ConfigError(
+                "Database connection timeout must be greater than 0".to_string(),
+            ));
         }
 
         // Validate MCP config
         if self.mcp.port == 0 {
-            return Err(RunItError::ConfigError("MCP port must be between 1 and 65535".to_string()));
+            return Err(RunItError::ConfigError(
+                "MCP port must be between 1 and 65535".to_string(),
+            ));
         }
 
         // Validate logging level
         let valid_levels = ["trace", "debug", "info", "warn", "error"];
         if !valid_levels.contains(&self.logging.level.as_str()) {
-            return Err(RunItError::ConfigError(format!("Invalid logging level: {}", self.logging.level)));
+            return Err(RunItError::ConfigError(format!(
+                "Invalid logging level: {}",
+                self.logging.level
+            )));
         }
 
         Ok(())
@@ -425,23 +448,53 @@ pub fn get_config_dir() -> Result<PathBuf> {
     let home_dir = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| RunItError::ConfigError("Could not determine home directory".to_string()))?;
-    
+
     Ok(PathBuf::from(home_dir).join(".runit"))
 }
 
 // Default value functions for serde
-fn default_connection_timeout() -> u32 { 30 }
-fn default_cleanup_interval_hours() -> u32 { 24 }
-fn default_activity_log_retention_days() -> u32 { 30 }
-fn default_inactivity_timeout() -> String { "30m".to_string() }
-fn default_health_check_interval() -> u32 { 30 }
-fn default_restart_delay() -> u32 { 5 }
-fn default_max_restart_attempts() -> u32 { 3 }
-fn default_auto_restart_on_crash() -> bool { true }
-fn default_mcp_port() -> u16 { 3000 }
-fn default_mcp_host() -> String { "127.0.0.1".to_string() }
-fn default_mcp_auto_start() -> bool { true }
-fn default_log_level() -> String { "info".to_string() }
-fn default_file_enabled() -> bool { true }
-fn default_max_file_size_mb() -> u32 { 10 }
-fn default_max_files() -> u32 { 5 }
+fn default_connection_timeout() -> u32 {
+    30
+}
+fn default_cleanup_interval_hours() -> u32 {
+    24
+}
+fn default_activity_log_retention_days() -> u32 {
+    30
+}
+fn default_inactivity_timeout() -> String {
+    "30m".to_string()
+}
+fn default_health_check_interval() -> u32 {
+    30
+}
+fn default_restart_delay() -> u32 {
+    5
+}
+fn default_max_restart_attempts() -> u32 {
+    3
+}
+fn default_auto_restart_on_crash() -> bool {
+    true
+}
+fn default_mcp_port() -> u16 {
+    3000
+}
+fn default_mcp_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_mcp_auto_start() -> bool {
+    true
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_file_enabled() -> bool {
+    true
+}
+fn default_max_file_size_mb() -> u32 {
+    10
+}
+fn default_max_files() -> u32 {
+    5
+}

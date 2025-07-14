@@ -64,7 +64,7 @@ mod tests {
 
         // Can't go from Stopped to Running directly
         assert!(!process.can_transition_to(&ProcessStatus::Running));
-        
+
         // Can't go from Stopped to Stopping
         assert!(!process.can_transition_to(&ProcessStatus::Stopping));
     }
@@ -103,7 +103,10 @@ mod tests {
         process.set_env_var("PORT".to_string(), "3000".to_string());
 
         assert_eq!(process.env_vars.len(), 2);
-        assert_eq!(process.get_env_var("NODE_ENV"), Some(&"production".to_string()));
+        assert_eq!(
+            process.get_env_var("NODE_ENV"),
+            Some(&"production".to_string())
+        );
         assert_eq!(process.get_env_var("PORT"), Some(&"3000".to_string()));
         assert_eq!(process.get_env_var("DEBUG"), None);
     }
@@ -118,8 +121,11 @@ mod tests {
         );
 
         process.set_health_check("http://localhost:8000/health".to_string(), 30);
-        
-        assert_eq!(process.health_check_url, Some("http://localhost:8000/health".to_string()));
+
+        assert_eq!(
+            process.health_check_url,
+            Some("http://localhost:8000/health".to_string())
+        );
         assert_eq!(process.health_check_interval, Some(30));
     }
 
@@ -171,9 +177,9 @@ mod tests {
 
         let before = process.last_activity;
         std::thread::sleep(std::time::Duration::from_millis(10));
-        
+
         process.update_activity();
-        
+
         assert!(process.last_activity.is_some());
         assert!(process.last_activity > before);
     }
@@ -201,11 +207,11 @@ mod tests {
     }
 }
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
-use chrono::{DateTime, Utc};
 use std::fmt;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ProcessStatus {
@@ -221,13 +227,13 @@ impl fmt::Display for ProcessStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status_str = match self {
             ProcessStatus::Stopped => "stopped",
-            ProcessStatus::Starting => "starting", 
+            ProcessStatus::Starting => "starting",
             ProcessStatus::Running => "running",
             ProcessStatus::Stopping => "stopping",
             ProcessStatus::Failed => "failed",
             ProcessStatus::Crashed => "crashed",
         };
-        write!(f, "{}", status_str)
+        write!(f, "{status_str}")
     }
 }
 
@@ -251,14 +257,9 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(
-        name: String,
-        command: String,
-        working_dir: String,
-        environment_id: String,
-    ) -> Self {
+    pub fn new(name: String, command: String, working_dir: String, environment_id: String) -> Self {
         let now = Utc::now();
-        
+
         Self {
             id: Uuid::new_v4().to_string(),
             name,
@@ -287,37 +288,37 @@ impl Process {
 
     pub fn can_transition_to(&self, new_status: &ProcessStatus) -> bool {
         use ProcessStatus::*;
-        
+
         match (&self.status, new_status) {
             // From Stopped
             (Stopped, Starting) => true,
             (Stopped, Failed) => true,
-            
-            // From Starting  
+
+            // From Starting
             (Starting, Running) => true,
             (Starting, Failed) => true,
             (Starting, Crashed) => true,
-            
+
             // From Running
             (Running, Stopping) => true,
             (Running, Crashed) => true,
             (Running, Failed) => true,
-            
+
             // From Stopping
             (Stopping, Stopped) => true,
             (Stopping, Failed) => true,
-            
+
             // From Failed
             (Failed, Starting) => true,
             (Failed, Stopped) => true,
-            
+
             // From Crashed
             (Crashed, Starting) => true,
             (Crashed, Stopped) => true,
-            
+
             // Same status
             (status, new_status) if status == new_status => true,
-            
+
             // All other transitions are invalid
             _ => false,
         }
@@ -367,7 +368,10 @@ impl Process {
     }
 
     pub fn is_transitioning(&self) -> bool {
-        matches!(self.status, ProcessStatus::Starting | ProcessStatus::Stopping)
+        matches!(
+            self.status,
+            ProcessStatus::Starting | ProcessStatus::Stopping
+        )
     }
 
     pub fn set_pid(&mut self, pid: u32) {

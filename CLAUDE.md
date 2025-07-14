@@ -40,15 +40,21 @@ cargo build --release
 # Check code without building
 cargo check
 
-# Format code
+# Format code (ALWAYS run this)
 cargo fmt
 
 # Run clippy lints
 cargo clippy -- -D warnings
 
-# Run all checks
+# Run all checks (recommended before commits)
 cargo fmt && cargo clippy -- -D warnings && cargo test
 ```
+
+### Code Formatting
+- **ALWAYS run `cargo fmt` before committing code**
+- Code formatting is enforced with rustfmt to maintain consistency
+- All code should follow the project's formatting standards
+- Use `cargo fmt` during development to catch formatting issues early
 
 ### Project Structure Rules
 - Keep modules focused and small
