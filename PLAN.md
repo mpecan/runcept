@@ -110,21 +110,29 @@ src/
    - ✅ Implement serialization support
 
 ### Phase 2: Configuration System
-4. **Project Configuration** (`config/project.rs`)
+4. **Global Configuration** (`config/global.rs`)
+   - ✅ Write tests for global configuration loading and saving
+   - ✅ Implement global configuration in ~/.runit/config.toml
+   - ✅ Write tests for default settings and user preferences
+   - ✅ Implement default settings and user preferences
+   - ✅ Write tests for global environment variables and paths
+   - ✅ Implement global environment variables and paths
+
+5. **Project Configuration** (`config/project.rs`)
    - Write tests for .runit.toml parsing and validation
    - Implement .runit.toml parsing and validation
    - Write tests for process dependency resolution
    - Implement process dependency resolution
-   - Write tests for environment variable handling
-   - Implement environment variable handling
+   - Write tests for configuration merging (global + project)
+   - Implement configuration merging (global + project)
 
-5. **Environment Management** (`config/environment.rs`)
+6. **Environment Management** (`config/environment.rs`)
    - Write tests for environment activation/deactivation
    - Implement environment activation/deactivation logic
    - Write tests for project discovery and registration
    - Implement project discovery and registration
-   - Write tests for global settings management
-   - Implement global settings management
+   - Write tests for configuration inheritance
+   - Implement configuration inheritance
 
 ### Phase 3: Process Management
 6. **Process Manager** (`process/manager.rs`)
