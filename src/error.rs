@@ -1,0 +1,126 @@
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_process_error_creation() {
+        let error = RunItError::ProcessError("test process error".to_string());
+        assert_eq!(error.to_string(), "Process error: test process error");
+    }
+
+    #[test]
+    fn test_config_error_creation() {
+        let error = RunItError::ConfigError("invalid config".to_string());
+        assert_eq!(error.to_string(), "Configuration error: invalid config");
+    }
+
+    #[test]
+    fn test_database_error_creation() {
+        let error = RunItError::DatabaseError("connection failed".to_string());
+        assert_eq!(error.to_string(), "Database error: connection failed");
+    }
+
+    #[test]
+    fn test_io_error_conversion() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let runit_error: RunItError = io_error.into();
+        assert!(matches!(runit_error, RunItError::IoError(_)));
+    }
+
+    #[test]
+    fn test_toml_error_conversion() {
+        let invalid_toml = "invalid = [toml";
+        let toml_error = toml::from_str::<toml::Value>(invalid_toml).unwrap_err();
+        let runit_error: RunItError = toml_error.into();
+        assert!(matches!(runit_error, RunItError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_error_is_retriable() {
+        let io_error = RunItError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
+        assert!(io_error.is_retriable());
+
+        let config_error = RunItError::ConfigError("test".to_string());
+        assert!(!config_error.is_retriable());
+    }
+}
+
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum RunItError {
+    #[error("Process error: {0}")]
+    ProcessError(String),
+
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+
+    #[error("Environment error: {0}")]
+    EnvironmentError(String),
+
+    #[error("MCP error: {0}")]
+    McpError(String),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
+
+    #[error("SQL error: {0}")]
+    SqlError(#[from] sqlx::Error),
+
+    #[error("HTTP error: {0}")]
+    HttpError(#[from] reqwest::Error),
+
+    #[error("System error: {0}")]
+    SystemError(String),
+
+    #[error("Timeout error: {0}")]
+    TimeoutError(String),
+}
+
+impl From<toml::de::Error> for RunItError {
+    fn from(error: toml::de::Error) -> Self {
+        RunItError::ConfigError(error.to_string())
+    }
+}
+
+impl From<nix::Error> for RunItError {
+    fn from(error: nix::Error) -> Self {
+        RunItError::SystemError(error.to_string())
+    }
+}
+
+impl RunItError {
+    pub fn is_retriable(&self) -> bool {
+        matches!(
+            self,
+            RunItError::IoError(_) |
+            RunItError::HttpError(_) |
+            RunItError::DatabaseError(_) |
+            RunItError::TimeoutError(_)
+        )
+    }
+
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            RunItError::ProcessError(_) => "PROCESS_ERROR",
+            RunItError::ConfigError(_) => "CONFIG_ERROR",
+            RunItError::DatabaseError(_) => "DATABASE_ERROR",
+            RunItError::EnvironmentError(_) => "ENVIRONMENT_ERROR",
+            RunItError::McpError(_) => "MCP_ERROR",
+            RunItError::IoError(_) => "IO_ERROR",
+            RunItError::JsonError(_) => "JSON_ERROR",
+            RunItError::SqlError(_) => "SQL_ERROR",
+            RunItError::HttpError(_) => "HTTP_ERROR",
+            RunItError::SystemError(_) => "SYSTEM_ERROR",
+            RunItError::TimeoutError(_) => "TIMEOUT_ERROR",
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, RunItError>;

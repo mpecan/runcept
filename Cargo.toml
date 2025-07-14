@@ -2,5 +2,38 @@
 name = "runit"
 version = "0.1.0"
 edition = "2024"
+authors = ["mpecan <noreply@example.com>"]
+description = "A process manager with MCP server and CLI interface"
+license = "MIT"
+
+[[bin]]
+name = "runit"
+path = "src/main.rs"
+
+[[bin]]
+name = "runit-mcp"
+path = "src/mcp_main.rs"
 
 [dependencies]
+tokio = { version = "1.46", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.9"
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.17", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+nix = "0.30"
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+reqwest = { version = "0.12", features = ["json"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.0"
+assert_cmd = "2.0"
+predicates = "3.0"

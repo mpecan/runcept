@@ -89,3 +89,29 @@ Always justify new dependencies and prefer:
 - Provide helpful error messages for users
 - Log errors appropriately for debugging
 - Handle edge cases gracefully
+
+### Progress Tracking
+- **IMPORTANT**: Always update PLAN.md to track implementation progress
+- Mark completed sub-tasks with ✅ in the PLAN.md file
+- Update phase completion status as you progress
+- Use clear markers like "✅ COMPLETED" or "🚧 IN PROGRESS" or "⏳ PENDING"
+- When starting a new phase, mark it as "🚧 IN PROGRESS"
+- When completing tests, mark them as "✅ Tests completed"
+- When completing implementation, mark as "✅ Implementation completed"
+
+### Progress Tracking Example
+```markdown
+### Phase 1: Core Foundation
+1. **Error Handling System** (`error.rs`)
+   - ✅ Write tests for error types and conversions
+   - ✅ Implement custom error types for different failure modes
+   - ✅ Implement error conversion traits and user-friendly messages
+
+2. **Database Layer** (`database/`)
+   - 🚧 Write tests for database operations and migrations
+   - ⏳ Implement SQLite database setup with migrations
+   - ⏳ Implement schema for processes, environments, and activity tracking
+   - ⏳ Implement database operations and connection management
+```
+
+This helps track what's been completed and what still needs work across development sessions.
