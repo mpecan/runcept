@@ -85,6 +85,12 @@ pub enum RunceptError {
 
     #[error("Timeout error: {0}")]
     TimeoutError(String),
+
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
 }
 
 impl From<toml::de::Error> for RunceptError {
@@ -109,6 +115,7 @@ impl RunceptError {
                 | RunceptError::SqlError(_)
                 | RunceptError::MigrationError(_)
                 | RunceptError::TimeoutError(_)
+                | RunceptError::ConnectionError(_)
         )
     }
 
@@ -126,6 +133,8 @@ impl RunceptError {
             RunceptError::HttpError(_) => "HTTP_ERROR",
             RunceptError::SystemError(_) => "SYSTEM_ERROR",
             RunceptError::TimeoutError(_) => "TIMEOUT_ERROR",
+            RunceptError::ConnectionError(_) => "CONNECTION_ERROR",
+            RunceptError::SerializationError(_) => "SERIALIZATION_ERROR",
         }
     }
 }
