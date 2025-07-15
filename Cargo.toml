@@ -30,6 +30,7 @@ anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 uuid = { version = "1.17", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 nix = { version = "0.30", features = ["signal", "process"] }

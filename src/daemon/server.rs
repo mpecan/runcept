@@ -245,7 +245,7 @@ impl ServerHandles {
         };
 
         // Create a map of running processes for quick lookup
-        let running_processes_map: std::collections::HashMap<String, &crate::process::Process> = 
+        let running_processes_map: std::collections::HashMap<String, &crate::process::Process> =
             process_manager
                 .list_processes()
                 .into_iter()
@@ -254,8 +254,8 @@ impl ServerHandles {
 
         // Build process list from configured processes, showing their current status
         let processes: Vec<ProcessInfo> = configured_processes
-            .iter()
-            .map(|(name, _process_def)| {
+            .keys()
+            .map(|name| {
                 if let Some(running_process) = running_processes_map.get(name) {
                     // Process is running, show actual status
                     ProcessInfo {
@@ -263,7 +263,12 @@ impl ServerHandles {
                         name: running_process.name.clone(),
                         status: running_process.status.to_string(),
                         pid: running_process.pid,
-                        uptime: Some(running_process.created_at.format("%Y-%m-%d %H:%M:%S").to_string()),
+                        uptime: Some(
+                            running_process
+                                .created_at
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string(),
+                        ),
                         environment: environment_name.clone(),
                         health_status: None, // TODO: Implement health status tracking
                         restart_count: 0,    // TODO: Implement restart count tracking
@@ -272,7 +277,7 @@ impl ServerHandles {
                 } else {
                     // Process is configured but not running
                     ProcessInfo {
-                        id: format!("{}-configured", name),
+                        id: format!("{name}-configured"),
                         name: name.clone(),
                         status: "configured".to_string(),
                         pid: None,
@@ -365,8 +370,9 @@ impl ServerHandles {
     /// Request shutdown from server handles
     pub async fn request_shutdown(&self) -> Result<()> {
         if let Some(shutdown_tx) = &self.shutdown_tx {
-            shutdown_tx.send(()).await
-                .map_err(|_| RunceptError::ProcessError("Failed to send shutdown signal".to_string()))?;
+            shutdown_tx.send(()).await.map_err(|_| {
+                RunceptError::ProcessError("Failed to send shutdown signal".to_string())
+            })?;
         }
         Ok(())
     }
@@ -453,7 +459,10 @@ impl ServerHandles {
 
         let (active_environment, project_path) = if let Some(env_id) = &current_env_id {
             if let Some(env) = env_manager.get_environment(env_id) {
-                (Some(env.name.clone()), Some(env.project_path.to_string_lossy().to_string()))
+                (
+                    Some(env.name.clone()),
+                    Some(env.project_path.to_string_lossy().to_string()),
+                )
             } else {
                 (None, None)
             }
@@ -561,31 +570,128 @@ impl ServerHandles {
         Ok(DaemonResponse::ProcessList(processes))
     }
 
-    /// Get process logs (stub implementation for now)
+    /// Get process logs
     async fn get_process_logs(&self, name: String, lines: Option<usize>) -> Result<DaemonResponse> {
-        let process_manager = self.process_manager.read().await;
+        use crate::logging::log_debug;
 
-        // Find process by name
-        let _process = process_manager
+        log_debug(
+            "daemon",
+            &format!("Getting logs for process '{name}'"),
+            None,
+        );
+        let process_manager = self.process_manager.read().await;
+        let env_manager = self.environment_manager.read().await;
+        let current_env_id = self.current_environment_id.read().await.clone();
+        log_debug(
+            "daemon",
+            &format!("Current environment ID: {current_env_id:?}"),
+            None,
+        );
+
+        // First check if the process is currently running
+        if let Some((process_id, _process)) = process_manager
             .list_processes()
             .into_iter()
             .find(|(_, p)| p.name == name)
-            .ok_or_else(|| RunceptError::ProcessError(format!("Process '{name}' not found")))?;
+        {
+            log_debug(
+                "daemon",
+                &format!("Found running process with ID: {process_id}"),
+                None,
+            );
+            // Process is running, get logs from process manager
+            let log_entries = process_manager.get_process_logs(process_id, lines).await?;
 
-        // TODO: Implement actual log retrieval from process manager
-        let log_lines = vec![LogLine {
-            timestamp: "2024-01-01 12:00:00".to_string(),
-            level: "INFO".to_string(),
-            message: format!("Log entry for process '{name}' (stub implementation)"),
-        }];
+            // Convert LogEntry to LogLine format expected by the response
+            let log_lines: Vec<LogLine> = log_entries
+                .into_iter()
+                .map(|entry| LogLine {
+                    timestamp: entry.timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
+                    level: entry.level.to_string(),
+                    message: entry.message,
+                })
+                .collect();
+
+            let total_lines = log_lines.len();
+
+            return Ok(DaemonResponse::ProcessLogs(LogsResponse {
+                process_name: name,
+                lines: log_lines,
+                total_lines,
+            }));
+        }
+
+        // Process is not running, try to read logs from filesystem
+        log_debug(
+            "daemon",
+            &format!("Process '{name}' not running, trying filesystem"),
+            None,
+        );
+
+        // We need to get the current environment's project path
+        let project_path = if let Some(env_id) = &current_env_id {
+            if let Some(env) = env_manager.get_environment(env_id) {
+                log_debug(
+                    "daemon",
+                    &format!("Using project path: {}", env.project_path.display()),
+                    None,
+                );
+                env.project_path.clone()
+            } else {
+                return Err(RunceptError::EnvironmentError(
+                    "No active environment".to_string(),
+                ));
+            }
+        } else {
+            return Err(RunceptError::EnvironmentError(
+                "No active environment".to_string(),
+            ));
+        };
+
+        // Check if this process name exists in the current environment configuration
+        let env_id = current_env_id
+            .ok_or_else(|| RunceptError::EnvironmentError("No active environment".to_string()))?;
+        let environment = env_manager.get_environment(&env_id).ok_or_else(|| {
+            RunceptError::EnvironmentError(format!("Environment '{env_id}' not found"))
+        })?;
+
+        if !environment.project_config.processes.contains_key(&name) {
+            return Err(RunceptError::ProcessError(format!(
+                "Process '{name}' not found in environment"
+            )));
+        }
+
+        // Read logs from filesystem
+        log_debug(
+            "daemon",
+            &format!("Reading logs for '{name}' from '{}'", project_path.display()),
+            None,
+        );
+        let log_entries = crate::process::read_process_logs(&name, &project_path, lines).await?;
+        log_debug(
+            "daemon",
+            &format!("Found {} log entries", log_entries.len()),
+            None,
+        );
+
+        // Convert LogEntry to LogLine format expected by the response
+        let log_lines: Vec<LogLine> = log_entries
+            .into_iter()
+            .map(|entry| LogLine {
+                timestamp: entry.timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
+                level: entry.level.to_string(),
+                message: entry.message,
+            })
+            .collect();
+
+        let total_lines = log_lines.len();
 
         let logs = LogsResponse {
             process_name: name,
             lines: log_lines,
-            total_lines: 1,
+            total_lines,
         };
 
-        let _ = lines; // Suppress unused warning
         Ok(DaemonResponse::ProcessLogs(logs))
     }
 
@@ -615,7 +721,7 @@ impl ServerHandles {
         if let Ok(mut process_manager) = self.process_manager.try_write() {
             let _ = process_manager.cleanup_finished_processes().await;
         }
-        
+
         let process_manager = self.process_manager.read().await;
         let env_manager = self.environment_manager.read().await;
 

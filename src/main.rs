@@ -2,8 +2,10 @@ use clap::Parser;
 use runcept::cli::{CliArgs, CliHandler, CliResult};
 use runcept::config::GlobalConfig;
 use runcept::daemon::{DaemonServer, ServerConfig};
+use runcept::logging;
 use std::path::PathBuf;
 use std::process;
+use tracing::info;
 
 #[tokio::main]
 async fn main() {
@@ -17,6 +19,21 @@ async fn main() {
 
     // Parse command line arguments for regular CLI
     let args = CliArgs::parse();
+
+    // Load global configuration for logging
+    let global_config = match GlobalConfig::load().await {
+        Ok(config) => config,
+        Err(_) => {
+            // If config loading fails, use default config for logging
+            eprintln!("Warning: Failed to load global configuration, using defaults");
+            GlobalConfig::default()
+        }
+    };
+
+    // Initialize CLI logging
+    if let Err(e) = logging::init_cli_logging(&global_config) {
+        eprintln!("Warning: Failed to initialize logging: {e}");
+    }
 
     // Create CLI handler
     let mut handler = CliHandler::new(args.socket.clone()).with_verbose(args.verbose);
@@ -84,6 +101,14 @@ async fn run_daemon_process(args: Vec<String>) {
             process::exit(1);
         }
     };
+
+    // Initialize daemon logging
+    if let Err(e) = logging::init_daemon_logging(&global_config) {
+        eprintln!("Failed to initialize daemon logging: {e}");
+        process::exit(1);
+    }
+
+    info!("Starting daemon process");
 
     // Create server configuration
     let server_config = ServerConfig {
