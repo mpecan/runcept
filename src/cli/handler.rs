@@ -158,7 +158,23 @@ impl CliHandler {
         match command {
             // Environment commands
             Commands::Activate { path } => {
-                Some(DaemonRequest::ActivateEnvironment { path: path.clone() })
+                // Convert path to absolute path for daemon
+                let absolute_path = if let Some(p) = path {
+                    // Convert to absolute path
+                    std::path::Path::new(p)
+                        .canonicalize()
+                        .map(|abs_path| abs_path.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| p.clone()) // Fallback to original path if canonicalize fails
+                } else {
+                    // Use current working directory as absolute path
+                    std::env::current_dir()
+                        .map(|cwd| cwd.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| ".".to_string())
+                };
+
+                Some(DaemonRequest::ActivateEnvironment {
+                    path: Some(absolute_path),
+                })
             }
             Commands::Deactivate => Some(DaemonRequest::DeactivateEnvironment),
             Commands::Status => Some(DaemonRequest::GetEnvironmentStatus),

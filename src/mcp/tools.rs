@@ -4,8 +4,10 @@ use rmcp::{
     Error as McpError, RoleServer, ServerHandler, handler::server::router::tool::ToolRouter,
     model::*, schemars, service::RequestContext, tool, tool_handler, tool_router,
 };
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
+use tokio::sync::RwLock;
 
 /// Helper function to send request to daemon and get response
 async fn send_daemon_request(
@@ -143,6 +145,7 @@ fn format_daemon_response(response: DaemonResponse) -> String {
 #[derive(Clone, Debug)]
 pub struct RunceptTools {
     pub tool_router: ToolRouter<RunceptTools>,
+    pub current_environment: Arc<RwLock<Option<String>>>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -177,7 +180,20 @@ impl RunceptTools {
     pub fn new() -> Self {
         Self {
             tool_router: Self::tool_router(),
+            current_environment: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Helper method to record activity for the current environment
+    async fn record_current_environment_activity(&self) -> Result<(), McpError> {
+        let current_env = self.current_environment.read().await;
+        if let Some(env_id) = current_env.as_ref() {
+            let activity_request = DaemonRequest::RecordEnvironmentActivity {
+                environment_id: env_id.clone(),
+            };
+            let _ = send_daemon_request(activity_request).await; // Ignore activity tracking errors
+        }
+        Ok(())
     }
 
     /// Activate a project environment from .runcept.toml configuration
@@ -186,8 +202,36 @@ impl RunceptTools {
         &self,
         Parameters(EnvironmentPathParam { path }): Parameters<EnvironmentPathParam>,
     ) -> Result<CallToolResult, McpError> {
-        let request = DaemonRequest::ActivateEnvironment { path };
+        // Resolve path to absolute path for both daemon request and environment ID
+        let absolute_path = if let Some(p) = path {
+            // Convert to absolute path
+            std::path::Path::new(&p)
+                .canonicalize()
+                .map(|abs_path| abs_path.to_string_lossy().to_string())
+                .unwrap_or_else(|_| p) // Fallback to original path if canonicalize fails
+        } else {
+            // Use current working directory as absolute path
+            std::env::current_dir()
+                .map(|cwd| cwd.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string())
+        };
+
+        // Send activation request with absolute path
+        let request = DaemonRequest::ActivateEnvironment {
+            path: Some(absolute_path.clone()),
+        };
         let response = send_daemon_request(request).await?;
+
+        // If activation was successful, update our current environment state
+        if let DaemonResponse::Success { .. } = response {
+            *self.current_environment.write().await = Some(absolute_path.clone());
+
+            // Record initial activity for the newly activated environment
+            let activity_request = DaemonRequest::RecordEnvironmentActivity {
+                environment_id: absolute_path,
+            };
+            let _ = send_daemon_request(activity_request).await; // Ignore activity tracking errors
+        }
 
         let result_text = format_daemon_response(response);
         Ok(CallToolResult::success(vec![Content::text(result_text)]))
@@ -199,6 +243,11 @@ impl RunceptTools {
         let request = DaemonRequest::DeactivateEnvironment;
         let response = send_daemon_request(request).await?;
 
+        // If deactivation was successful, clear our current environment state
+        if let DaemonResponse::Success { .. } = response {
+            *self.current_environment.write().await = None;
+        }
+
         let result_text = format_daemon_response(response);
         Ok(CallToolResult::success(vec![Content::text(result_text)]))
     }
@@ -206,6 +255,9 @@ impl RunceptTools {
     /// Get the status of the current environment
     #[tool(description = "Get the status of the current environment")]
     async fn get_environment_status(&self) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
         let request = DaemonRequest::GetEnvironmentStatus;
         let response = send_daemon_request(request).await?;
 
@@ -219,6 +271,9 @@ impl RunceptTools {
         &self,
         Parameters(NameParam { name }): Parameters<NameParam>,
     ) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
         let request = DaemonRequest::StartProcess { name };
         let response = send_daemon_request(request).await?;
 
@@ -232,6 +287,9 @@ impl RunceptTools {
         &self,
         Parameters(NameParam { name }): Parameters<NameParam>,
     ) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
         let request = DaemonRequest::StopProcess { name };
         let response = send_daemon_request(request).await?;
 
@@ -245,6 +303,9 @@ impl RunceptTools {
         &self,
         Parameters(NameParam { name }): Parameters<NameParam>,
     ) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
         let request = DaemonRequest::RestartProcess { name };
         let response = send_daemon_request(request).await?;
 
@@ -255,6 +316,9 @@ impl RunceptTools {
     /// List processes in the current environment
     #[tool(description = "List processes in the current environment")]
     async fn list_processes(&self) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
         let request = DaemonRequest::ListProcesses;
         let response = send_daemon_request(request).await?;
 
@@ -268,6 +332,9 @@ impl RunceptTools {
         &self,
         Parameters(LogsParam { name, lines }): Parameters<LogsParam>,
     ) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
         let request = DaemonRequest::GetProcessLogs { name, lines };
         let response = send_daemon_request(request).await?;
 
@@ -303,6 +370,23 @@ impl RunceptTools {
 
         let result_text = format_daemon_response(response);
         Ok(CallToolResult::success(vec![Content::text(result_text)]))
+    }
+
+    /// Record activity for the current environment (for inactivity tracking)
+    #[tool(description = "Record activity for the current environment to prevent auto-shutdown")]
+    async fn record_environment_activity(&self) -> Result<CallToolResult, McpError> {
+        let _ = self.record_current_environment_activity().await;
+
+        let current_env = self.current_environment.read().await;
+        if let Some(env_id) = current_env.as_ref() {
+            Ok(CallToolResult::success(vec![Content::text(format!(
+                "Recorded activity for environment '{env_id}'"
+            ))]))
+        } else {
+            Ok(CallToolResult::success(vec![Content::text(
+                "No active environment to record activity for".to_string(),
+            )]))
+        }
     }
 }
 

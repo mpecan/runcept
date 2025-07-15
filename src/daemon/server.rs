@@ -364,6 +364,11 @@ impl ServerHandles {
                     })
                 }
             }
+
+            // Activity tracking commands
+            DaemonRequest::RecordEnvironmentActivity { environment_id } => {
+                self.record_environment_activity(environment_id).await
+            }
         }
     }
 
@@ -753,5 +758,24 @@ impl ServerHandles {
         };
 
         Ok(DaemonResponse::DaemonStatus(status))
+    }
+
+    /// Record environment activity for inactivity tracking
+    async fn record_environment_activity(&self, environment_id: String) -> Result<DaemonResponse> {
+        let inactivity_scheduler = self.inactivity_scheduler.read().await;
+
+        if let Some(scheduler) = inactivity_scheduler.as_ref() {
+            scheduler
+                .activity_tracker
+                .record_environment_activity(&environment_id)
+                .await;
+            Ok(DaemonResponse::Success {
+                message: format!("Recorded activity for environment '{environment_id}'"),
+            })
+        } else {
+            Ok(DaemonResponse::Error {
+                error: "Inactivity scheduler not available".to_string(),
+            })
+        }
     }
 }

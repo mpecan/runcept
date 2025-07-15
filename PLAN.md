@@ -212,8 +212,10 @@ src/
     - ✅ Implement process management tools (start, stop, restart, list, logs)
     - ✅ Implement daemon communication via Unix socket
     - ✅ Implement proper error handling and response formatting
+    - ✅ Implement environment-level activity tracking integration
+    - ✅ Add environment state management to MCP tools
+    - ✅ Integrate activity tracking into all MCP operations
     - ⏳ Write tests for activity tracking integration
-    - ⏳ Implement activity tracking integration
 
 ### Phase 6: Integration & End-to-End Testing
 15. **Integration Tests**

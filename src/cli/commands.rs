@@ -209,6 +209,9 @@ pub enum DaemonRequest {
     // Daemon commands
     GetDaemonStatus,
     Shutdown,
+
+    // Activity tracking commands
+    RecordEnvironmentActivity { environment_id: String },
 }
 
 /// Response types for daemon communication
