@@ -611,6 +611,11 @@ impl ServerHandles {
 
     /// Get daemon status
     async fn get_daemon_status(&self) -> Result<DaemonResponse> {
+        // Clean up finished processes before reporting status
+        if let Ok(mut process_manager) = self.process_manager.try_write() {
+            let _ = process_manager.cleanup_finished_processes().await;
+        }
+        
         let process_manager = self.process_manager.read().await;
         let env_manager = self.environment_manager.read().await;
 

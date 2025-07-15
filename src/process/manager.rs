@@ -360,10 +360,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
 pub struct ProcessHandle {
-    pub child: Child,
+    pub child: Arc<Mutex<Option<Child>>>,
     pub shutdown_tx: mpsc::Sender<()>,
 }
 
@@ -465,18 +467,76 @@ impl ProcessManager {
         // Set up shutdown channel
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
-        // Store process handle
-        let handle = ProcessHandle { child, shutdown_tx };
+        // Store process handle with Arc<Mutex<>> for shared access
+        let child_handle = Arc::new(Mutex::new(Some(child)));
+        let handle = ProcessHandle {
+            child: Arc::clone(&child_handle),
+            shutdown_tx,
+        };
 
         self.process_handles.insert(process_id.clone(), handle);
 
         // Spawn a task to monitor the process
-        let _process_id_clone = process_id.clone();
-
+        let process_id_clone = process_id.clone();
+        let child_for_monitoring = Arc::clone(&child_handle);
+        
+        // Create a weak reference to this ProcessManager for status updates
+        // (We'll need to add a way to signal back to the manager)
+        
         tokio::spawn(async move {
             tokio::select! {
+                // Process finished naturally
+                result = async {
+                    let mut child_guard = child_for_monitoring.lock().await;
+                    if let Some(mut child) = child_guard.take() {
+                        child.wait().await
+                    } else {
+                        // Child was already taken, probably for shutdown
+                        // Return early if child was already taken
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Child process handle already taken"));
+                    }
+                } => {
+                    match result {
+                        Ok(exit_status) => {
+                            println!("Process {} finished with status: {}", process_id_clone, exit_status);
+                        }
+                        Err(e) => {
+                            eprintln!("Error waiting for process {}: {}", process_id_clone, e);
+                        }
+                    }
+                }
+                // Graceful shutdown requested
                 _ = shutdown_rx.recv() => {
-                    // Graceful shutdown requested - the handle will clean up the child
+                    println!("Shutdown requested for process {}", process_id_clone);
+                    let mut child_guard = child_for_monitoring.lock().await;
+                    if let Some(mut child) = child_guard.take() {
+                        // Send SIGTERM for graceful shutdown
+                        match child.start_kill() {
+                            Ok(_) => {
+                                // Wait for the process to exit gracefully
+                                match tokio::time::timeout(
+                                    tokio::time::Duration::from_secs(5),
+                                    child.wait()
+                                ).await {
+                                    Ok(Ok(exit_status)) => {
+                                        println!("Process {} terminated gracefully: {}", process_id_clone, exit_status);
+                                    }
+                                    Ok(Err(e)) => {
+                                        eprintln!("Error during graceful shutdown of {}: {}", process_id_clone, e);
+                                    }
+                                    Err(_) => {
+                                        // Timeout - force kill
+                                        println!("Process {} did not respond to SIGTERM, force killing", process_id_clone);
+                                        let _ = child.kill().await;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to send SIGTERM to process {}: {}", process_id_clone, e);
+                                let _ = child.kill().await;
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -503,8 +563,8 @@ impl ProcessManager {
             let _ = handle.shutdown_tx.send(()).await;
         }
 
-        // Remove the handle since the process is stopping
-        self.process_handles.remove(process_id);
+        // Don't remove the handle immediately - let the monitoring task clean up
+        // The handle will be removed when we detect the process has actually stopped
 
         Ok(())
     }
@@ -570,10 +630,13 @@ impl ProcessManager {
 
         process.transition_to(ProcessStatus::Stopping);
 
-        if let Some(mut handle) = self.process_handles.remove(process_id) {
+        if let Some(handle) = self.process_handles.get(process_id) {
             if force {
                 // Force kill
-                let _ = handle.child.kill().await;
+                let mut child_guard = handle.child.lock().await;
+                if let Some(mut child) = child_guard.take() {
+                    let _ = child.kill().await;
+                }
             } else {
                 // Graceful shutdown
                 let _ = handle.shutdown_tx.send(()).await;
@@ -618,7 +681,54 @@ impl ProcessManager {
             .collect()
     }
 
+    /// Update process statuses by checking if their child processes are still alive
+    pub async fn update_process_statuses(&mut self) -> Result<()> {
+        let mut to_update = Vec::new();
+        
+        // Check which processes have handles that might have finished
+        for (process_id, handle) in &self.process_handles {
+            let mut child_guard = handle.child.lock().await;
+            if let Some(child) = child_guard.as_mut() {
+                // Try a non-blocking check to see if the process has finished
+                match child.try_wait() {
+                    Ok(Some(_exit_status)) => {
+                        // Process has finished
+                        to_update.push((process_id.clone(), ProcessStatus::Stopped));
+                        // Take the child to prevent further operations
+                        child_guard.take();
+                    }
+                    Ok(None) => {
+                        // Process is still running
+                    }
+                    Err(_e) => {
+                        // Error checking process status - assume it crashed
+                        to_update.push((process_id.clone(), ProcessStatus::Crashed));
+                        child_guard.take();
+                    }
+                }
+            } else if let Some(process) = self.processes.get(process_id) {
+                // Child handle is gone but process is still marked as running/stopping
+                if matches!(process.status, ProcessStatus::Running | ProcessStatus::Stopping) {
+                    to_update.push((process_id.clone(), ProcessStatus::Stopped));
+                }
+            }
+        }
+        
+        // Update process statuses
+        for (process_id, new_status) in to_update {
+            if let Some(process) = self.processes.get_mut(&process_id) {
+                process.transition_to(new_status);
+                process.clear_pid();
+            }
+        }
+        
+        Ok(())
+    }
+
     pub async fn cleanup_finished_processes(&mut self) -> Result<Vec<String>> {
+        // First update process statuses
+        self.update_process_statuses().await?;
+        
         let mut finished_processes = Vec::new();
 
         let finished_ids: Vec<String> = self
