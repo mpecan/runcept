@@ -165,38 +165,60 @@ src/
    - ✅ Implement graceful shutdown sequences
 
 9. **Health Monitoring** (`scheduler/health.rs`)
-   - Write tests for periodic health check execution
-   - Implement periodic health check execution
-   - Write tests for health status reporting
-   - Implement health status reporting
-   - Write tests for failure notification system
-   - Implement failure notification system
+   - ⏳ Write tests for periodic health check execution
+   - ⏳ Implement periodic health check execution
+   - ⏳ Write tests for health status reporting
+   - ⏳ Implement health status reporting
+   - ⏳ Write tests for failure notification system
+   - ⏳ Implement failure notification system
 
 ### Phase 5: Interfaces
 10. **CLI Implementation** (`cli/`)
-    - Write tests for environment commands
-    - Implement environment commands (activate, deactivate, status)
-    - Write tests for process commands with environment awareness
-    - Implement process commands with environment awareness
-    - Write tests for interactive command handlers
-    - Implement interactive command handlers
+    - ✅ Write tests for environment commands
+    - ✅ Implement environment commands (activate, deactivate, status)
+    - ✅ Write tests for process commands with environment awareness
+    - ✅ Implement process commands with environment awareness
+    - ✅ Write tests for interactive command handlers
+    - ✅ Implement interactive command handlers
 
-11. **MCP Server** (`mcp/`)
-    - Write tests for MCP protocol implementation
-    - Implement MCP protocol implementation
-    - Write tests for environment management tools
-    - Implement environment management tools
-    - Write tests for process management tools
-    - Implement process management tools
-    - Write tests for activity tracking integration
-    - Implement activity tracking integration
+11. **Daemon Server Implementation** (`daemon/`)
+    - ✅ Write tests for daemon server and RPC communication
+    - ✅ Implement daemon server with Unix socket communication
+    - ✅ Implement process management through daemon
+    - ✅ Implement environment management through daemon
+    - ✅ Implement proper shutdown mechanism
+    - ✅ Implement process log retrieval system
+
+12. **Process Logging System** (`process/logging.rs`)
+    - ✅ Write tests for process output logging
+    - ✅ Implement process output capture (stdout/stderr)
+    - ✅ Implement JSON Line format for structured logging
+    - ✅ Implement log storage in .runcept/logs/ directory
+    - ✅ Implement log retrieval for running and finished processes
+    - ✅ Implement backward compatibility with legacy formats
+
+13. **System Logging** (`logging.rs`)
+    - ✅ Implement comprehensive system logging with tracing
+    - ✅ Implement daemon logging to $HOME/.runcept/logs/daemon.log
+    - ✅ Implement configurable log levels
+    - ✅ Implement structured logging for debugging
+
+14. **MCP Server** (`mcp/`)
+    - ⏳ Write tests for MCP protocol implementation
+    - ⏳ Implement MCP protocol implementation
+    - ⏳ Write tests for environment management tools
+    - ⏳ Implement environment management tools
+    - ⏳ Write tests for process management tools
+    - ⏳ Implement process management tools
+    - ⏳ Write tests for activity tracking integration
+    - ⏳ Implement activity tracking integration
 
 ### Phase 6: Integration & End-to-End Testing
-12. **Integration Tests**
-    - End-to-end environment lifecycle testing
-    - MCP server functionality testing
-    - Auto-shutdown behavior testing
-    - Cross-component interaction testing
+15. **Integration Tests**
+    - ⏳ End-to-end environment lifecycle testing
+    - ⏳ MCP server functionality testing
+    - ⏳ Auto-shutdown behavior testing
+    - ⏳ Cross-component interaction testing
 
 ## Key Features to Implement
 
