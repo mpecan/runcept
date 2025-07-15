@@ -664,7 +664,10 @@ impl ServerHandles {
         // Read logs from filesystem
         log_debug(
             "daemon",
-            &format!("Reading logs for '{name}' from '{}'", project_path.display()),
+            &format!(
+                "Reading logs for '{name}' from '{}'",
+                project_path.display()
+            ),
             None,
         );
         let log_entries = crate::process::read_process_logs(&name, &project_path, lines).await?;

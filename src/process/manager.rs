@@ -515,9 +515,7 @@ impl ProcessManager {
                 {
                     let mut logger = stdout_logger.lock().await;
                     if let Err(e) = logger.log_stdout(line.trim()).await {
-                        eprintln!(
-                            "Failed to log stdout for process {stdout_process_id}: {e}"
-                        );
+                        eprintln!("Failed to log stdout for process {stdout_process_id}: {e}");
                     }
                 }
 
@@ -539,9 +537,7 @@ impl ProcessManager {
                 {
                     let mut logger = stderr_logger.lock().await;
                     if let Err(e) = logger.log_stderr(line.trim()).await {
-                        eprintln!(
-                            "Failed to log stderr for process {stderr_process_id}: {e}"
-                        );
+                        eprintln!("Failed to log stderr for process {stderr_process_id}: {e}");
                     }
                 }
 

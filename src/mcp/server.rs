@@ -1,0 +1,96 @@
+use crate::config::GlobalConfig;
+use crate::error::{Result, RunceptError};
+use crate::logging::{init_daemon_logging, log_daemon_event};
+use crate::mcp::tools::RunceptTools;
+use rmcp::service::ServiceExt;
+use rmcp::transport::io;
+
+/// MCP server configuration
+#[derive(Debug, Clone)]
+pub struct McpServerConfig {
+    pub global_config: GlobalConfig,
+    pub server_name: String,
+    pub server_version: String,
+}
+
+impl Default for McpServerConfig {
+    fn default() -> Self {
+        Self {
+            global_config: GlobalConfig::default(),
+            server_name: "runcept-mcp".to_string(),
+            server_version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+}
+
+/// MCP server handler that implements the ServerHandler trait
+pub struct RunceptMcpServer {
+    config: McpServerConfig,
+    tools: RunceptTools,
+}
+
+impl RunceptMcpServer {
+    /// Create a new MCP server
+    pub fn new(config: McpServerConfig) -> Self {
+        Self {
+            config,
+            tools: RunceptTools::new(),
+        }
+    }
+
+    /// Start the MCP server
+    pub async fn run(self) -> Result<()> {
+        // Initialize logging
+        init_daemon_logging(&self.config.global_config)?;
+        log_daemon_event("mcp_server_start", "MCP server starting");
+
+        // Create stdio transport
+        let transport = io::stdio();
+
+        // Serve the MCP server using the tools as the handler
+        self.tools
+            .serve(transport)
+            .await
+            .map_err(|e| RunceptError::ProcessError(format!("MCP server error: {e}")))?;
+
+        log_daemon_event("mcp_server_stop", "MCP server stopped");
+        Ok(())
+    }
+}
+
+/// Create and configure MCP server
+pub async fn create_mcp_server() -> Result<RunceptMcpServer> {
+    let global_config = GlobalConfig::load().await?;
+    let config = McpServerConfig {
+        global_config,
+        server_name: "runcept-mcp".to_string(),
+        server_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+
+    Ok(RunceptMcpServer::new(config))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mcp_server_config_default() {
+        let config = McpServerConfig::default();
+        assert_eq!(config.server_name, "runcept-mcp");
+        assert_eq!(config.server_version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn test_mcp_server_creation() {
+        let config = McpServerConfig::default();
+        let server = RunceptMcpServer::new(config.clone());
+        assert_eq!(server.config.server_name, config.server_name);
+    }
+
+    #[tokio::test]
+    async fn test_create_mcp_server() {
+        let server = create_mcp_server().await.unwrap();
+        assert_eq!(server.config.server_name, "runcept-mcp");
+    }
+}

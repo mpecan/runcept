@@ -31,9 +31,7 @@ pub fn init_logging(config: &GlobalConfig) -> Result<()> {
     // Create the filter
     let filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new(&log_level))
-        .map_err(|e| {
-            RunceptError::ConfigError(format!("Invalid log level '{log_level}': {e}"))
-        })?;
+        .map_err(|e| RunceptError::ConfigError(format!("Invalid log level '{log_level}': {e}")))?;
 
     // Set up the subscriber
     let registry = Registry::default().with(filter);

@@ -204,12 +204,14 @@ src/
     - ✅ Implement structured logging for debugging
 
 14. **MCP Server** (`mcp/`)
-    - ⏳ Write tests for MCP protocol implementation
-    - ⏳ Implement MCP protocol implementation
-    - ⏳ Write tests for environment management tools
-    - ⏳ Implement environment management tools
-    - ⏳ Write tests for process management tools
-    - ⏳ Implement process management tools
+    - ✅ Write tests for MCP protocol implementation
+    - ✅ Implement MCP protocol implementation with rmcp 0.2.1
+    - ✅ Write tests for environment management tools
+    - ✅ Implement environment management tools (activate, deactivate, status)
+    - ✅ Write tests for process management tools
+    - ✅ Implement process management tools (start, stop, restart, list, logs)
+    - ✅ Implement daemon communication via Unix socket
+    - ✅ Implement proper error handling and response formatting
     - ⏳ Write tests for activity tracking integration
     - ⏳ Implement activity tracking integration
 
