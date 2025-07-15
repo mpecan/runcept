@@ -133,6 +133,7 @@ mod tests {
         let manager = EnvironmentManager::new(global_config).await.unwrap();
 
         assert!(manager.environments.is_empty());
+        assert!(manager.database_pool.is_none());
     }
 
     #[tokio::test]
@@ -158,7 +159,8 @@ mod tests {
 
         let env = manager.environments.get(&env_id).unwrap();
         assert_eq!(env.name, "test-project-env");
-        assert_eq!(env.project_path, project_path);
+        // Compare canonical paths since register_project now canonicalizes paths
+        assert_eq!(env.project_path, project_path.canonicalize().unwrap());
     }
 
     #[tokio::test]
@@ -311,9 +313,11 @@ mod tests {
 }
 
 use crate::config::{GlobalConfig, ProjectConfig, find_project_config};
+use crate::database::QueryManager;
 use crate::error::{Result, RunceptError};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::{Pool, Sqlite};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -471,17 +475,47 @@ impl Environment {
 pub struct EnvironmentManager {
     pub environments: HashMap<String, Environment>,
     pub global_config: GlobalConfig,
+    pub database_pool: Option<Pool<Sqlite>>,
 }
 
 impl EnvironmentManager {
     pub async fn new(global_config: GlobalConfig) -> Result<Self> {
-        Ok(Self {
+        Self::new_with_database(global_config, None).await
+    }
+
+    pub async fn new_with_database(
+        global_config: GlobalConfig,
+        database_pool: Option<Pool<Sqlite>>,
+    ) -> Result<Self> {
+        let mut manager = Self {
             environments: HashMap::new(),
             global_config,
-        })
+            database_pool,
+        };
+
+        // Load environments from database if available
+        if manager.database_pool.is_some() {
+            manager.load_environments_from_database().await?;
+        }
+
+        Ok(manager)
     }
 
     pub async fn register_project(&mut self, project_path: &Path) -> Result<String> {
+        // First check if we already have this environment in database
+        let absolute_path = project_path.canonicalize().unwrap_or_else(|_| project_path.to_path_buf());
+        let path_str = absolute_path.to_string_lossy().to_string();
+        
+        if let Some(pool) = &self.database_pool {
+            let query_manager = QueryManager::new(pool);
+            if let Some(existing_env) = query_manager.get_environment_by_path(&path_str).await? {
+                // Environment already exists in database, load it into memory
+                let env_id = existing_env.id.clone();
+                self.environments.insert(env_id.clone(), existing_env);
+                return Ok(env_id);
+            }
+        }
+
         // Find project config
         let config_path = find_project_config(project_path).await?.ok_or_else(|| {
             RunceptError::ConfigError(format!(
@@ -496,44 +530,89 @@ impl EnvironmentManager {
         // Create environment
         let environment = Environment::new(
             project_config.environment.name.clone(),
-            project_path.to_path_buf(),
+            absolute_path,
             project_config,
             self.global_config.clone(),
         );
 
         let env_id = environment.id.clone();
+        
+        // Save to database first
+        self.save_environment_to_database(&environment).await?;
+        
+        // Then store in memory
         self.environments.insert(env_id.clone(), environment);
 
         Ok(env_id)
     }
 
     pub async fn activate_environment(&mut self, env_id: &str) -> Result<()> {
-        let environment = self.environments.get_mut(env_id).ok_or_else(|| {
-            RunceptError::EnvironmentError(format!("Environment {env_id} not found"))
-        })?;
+        // Update environment state in multiple steps to avoid borrowing conflicts
+        {
+            let environment = self.environments.get_mut(env_id).ok_or_else(|| {
+                RunceptError::EnvironmentError(format!("Environment {env_id} not found"))
+            })?;
 
-        // Transition to activating
-        environment.transition_to(EnvironmentStatus::Activating);
+            // Transition to activating
+            environment.transition_to(EnvironmentStatus::Activating);
+        }
+        
+        // Save intermediate state
+        if let Some(environment) = self.environments.get(env_id) {
+            self.save_environment_to_database(environment).await?;
+        }
 
-        // TODO: Start processes in dependency order
-        // For now, just mark as active
-        environment.transition_to(EnvironmentStatus::Active);
-        environment.update_activity();
+        // Continue with activation
+        {
+            let environment = self.environments.get_mut(env_id).ok_or_else(|| {
+                RunceptError::EnvironmentError(format!("Environment {env_id} not found"))
+            })?;
+
+            // TODO: Start processes in dependency order
+            // For now, just mark as active
+            environment.transition_to(EnvironmentStatus::Active);
+            environment.update_activity();
+        }
+        
+        // Persist final changes to database
+        if let Some(environment) = self.environments.get(env_id) {
+            self.save_environment_to_database(environment).await?;
+        }
 
         Ok(())
     }
 
     pub async fn deactivate_environment(&mut self, env_id: &str) -> Result<()> {
-        let environment = self.environments.get_mut(env_id).ok_or_else(|| {
-            RunceptError::EnvironmentError(format!("Environment {env_id} not found"))
-        })?;
+        // Update environment state in multiple steps to avoid borrowing conflicts
+        {
+            let environment = self.environments.get_mut(env_id).ok_or_else(|| {
+                RunceptError::EnvironmentError(format!("Environment {env_id} not found"))
+            })?;
 
-        // Transition to deactivating
-        environment.transition_to(EnvironmentStatus::Deactivating);
+            // Transition to deactivating
+            environment.transition_to(EnvironmentStatus::Deactivating);
+        }
+        
+        // Save intermediate state
+        if let Some(environment) = self.environments.get(env_id) {
+            self.save_environment_to_database(environment).await?;
+        }
 
-        // TODO: Stop all processes in reverse dependency order
-        // For now, just mark as inactive
-        environment.transition_to(EnvironmentStatus::Inactive);
+        // Continue with deactivation
+        {
+            let environment = self.environments.get_mut(env_id).ok_or_else(|| {
+                RunceptError::EnvironmentError(format!("Environment {env_id} not found"))
+            })?;
+
+            // TODO: Stop all processes in reverse dependency order
+            // For now, just mark as inactive
+            environment.transition_to(EnvironmentStatus::Inactive);
+        }
+        
+        // Persist final changes to database
+        if let Some(environment) = self.environments.get(env_id) {
+            self.save_environment_to_database(environment).await?;
+        }
 
         Ok(())
     }
@@ -598,6 +677,21 @@ impl EnvironmentManager {
         self.environments.iter().collect()
     }
 
+    /// Update environment activity and persist to database
+    pub async fn update_environment_activity(&mut self, env_id: &str) -> Result<()> {
+        // Update activity first
+        if let Some(environment) = self.environments.get_mut(env_id) {
+            environment.update_activity();
+        }
+        
+        // Then save to database
+        if let Some(environment) = self.environments.get(env_id) {
+            self.save_environment_to_database(environment).await?;
+        }
+        
+        Ok(())
+    }
+
     pub async fn cleanup_inactive_environments(
         &mut self,
         max_idle_hours: u32,
@@ -618,6 +712,10 @@ impl EnvironmentManager {
             .collect();
 
         for env_id in inactive_env_ids {
+            // Remove from database first
+            self.remove_environment_from_database(&env_id).await?;
+            
+            // Then remove from memory
             self.environments.remove(&env_id);
             cleaned_up.push(env_id);
         }
@@ -632,6 +730,84 @@ impl EnvironmentManager {
         for environment in self.environments.values_mut() {
             environment.merged_config =
                 environment.project_config.merge_with_global(&global_config);
+        }
+    }
+
+    /// Load environments from database
+    async fn load_environments_from_database(&mut self) -> Result<()> {
+        if let Some(pool) = &self.database_pool {
+            let query_manager = QueryManager::new(pool);
+            let environments = query_manager.list_environments().await?;
+
+            for env in environments {
+                self.environments.insert(env.id.clone(), env);
+            }
+        }
+        Ok(())
+    }
+
+    /// Save environment to database
+    async fn save_environment_to_database(&self, environment: &Environment) -> Result<()> {
+        if let Some(pool) = &self.database_pool {
+            let query_manager = QueryManager::new(pool);
+            
+            // Check if environment already exists
+            if query_manager.get_environment_by_id(&environment.id).await?.is_some() {
+                query_manager.update_environment(environment).await?;
+            } else {
+                query_manager.insert_environment(environment).await?;
+            }
+        }
+        Ok(())
+    }
+
+
+    /// Remove environment from database
+    async fn remove_environment_from_database(&self, env_id: &str) -> Result<()> {
+        if let Some(pool) = &self.database_pool {
+            let query_manager = QueryManager::new(pool);
+            query_manager.delete_environment(env_id).await?;
+        }
+        Ok(())
+    }
+
+    /// Search environments in database
+    pub async fn search_environments(&self, query: &str) -> Result<Vec<Environment>> {
+        if let Some(pool) = &self.database_pool {
+            let query_manager = QueryManager::new(pool);
+            query_manager.search_environments(query).await
+        } else {
+            // Fallback to in-memory search
+            let results: Vec<Environment> = self
+                .environments
+                .values()
+                .filter(|env| {
+                    env.name.to_lowercase().contains(&query.to_lowercase())
+                        || env.project_path
+                            .to_string_lossy()
+                            .to_lowercase()
+                            .contains(&query.to_lowercase())
+                })
+                .cloned()
+                .collect();
+            Ok(results)
+        }
+    }
+
+    /// Get environments by status from database
+    pub async fn get_environments_by_status(&self, status: EnvironmentStatus) -> Result<Vec<Environment>> {
+        if let Some(pool) = &self.database_pool {
+            let query_manager = QueryManager::new(pool);
+            query_manager.get_environments_by_status(status).await
+        } else {
+            // Fallback to in-memory filtering
+            let results: Vec<Environment> = self
+                .environments
+                .values()
+                .filter(|env| env.status == status)
+                .cloned()
+                .collect();
+            Ok(results)
         }
     }
 }

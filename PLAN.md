@@ -102,6 +102,9 @@ src/
    - ✅ Implement SQLite database setup with migrations
    - ✅ Implement schema for processes, environments, and activity tracking
    - ✅ Implement database operations and connection management
+   - ✅ Implement comprehensive environment CRUD operations
+   - ✅ Implement environment search and filtering capabilities
+   - ✅ Implement activity tracking and cleanup operations
 
 3. **Process Representation** (`process/process.rs`)
    - ✅ Write tests for process struct and state transitions
@@ -133,6 +136,10 @@ src/
    - ✅ Implement project discovery and registration
    - ✅ Write tests for configuration inheritance
    - ✅ Implement configuration inheritance
+   - ✅ Integrate database persistence with EnvironmentManager
+   - ✅ Implement hybrid in-memory + database architecture
+   - ✅ Implement automatic environment state synchronization
+   - ✅ Implement database-backed environment search and discovery
 
 ### Phase 3: Process Management
 7. **Process Manager** (`process/manager.rs`)
@@ -188,6 +195,9 @@ src/
     - ✅ Implement environment management through daemon
     - ✅ Implement proper shutdown mechanism
     - ✅ Implement process log retrieval system
+    - ✅ Integrate database with DaemonServer
+    - ✅ Implement automatic database initialization on daemon start
+    - ✅ Enable persistent environment management across daemon restarts
 
 12. **Process Logging System** (`process/logging.rs`)
     - ✅ Write tests for process output logging
@@ -217,8 +227,21 @@ src/
     - ✅ Integrate activity tracking into all MCP operations
     - ⏳ Write tests for activity tracking integration
 
-### Phase 6: Integration & End-to-End Testing
-15. **Integration Tests**
+### Phase 6: Database Integration & Persistence
+15. **Database Integration** (`config/environment.rs`, `daemon/server.rs`, `main.rs`)
+    - ✅ Implement QueryManager with comprehensive environment operations
+    - ✅ Integrate database with EnvironmentManager for hybrid architecture
+    - ✅ Add database initialization to daemon startup
+    - ✅ Implement automatic environment persistence on state changes
+    - ✅ Enable environment loading from database on daemon restart
+    - ✅ Implement path canonicalization for environment consistency
+    - ✅ Add database-backed environment search and filtering
+    - ✅ **Manual Testing**: Database integration verified with test environment
+    - ✅ **Persistence Testing**: Environment data survives daemon restarts
+    - ✅ **State Management**: All environment transitions saved to database
+
+### Phase 7: Integration & End-to-End Testing
+16. **Integration Tests**
     - ⏳ End-to-end environment lifecycle testing
     - ⏳ MCP server functionality testing
     - ⏳ Auto-shutdown behavior testing

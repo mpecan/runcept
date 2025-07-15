@@ -13,6 +13,7 @@ mod tests {
         let config = ServerConfig {
             socket_path: socket_path.clone(),
             global_config: GlobalConfig::default(),
+            database: None,
         };
 
         let server = DaemonServer::new(config).await.unwrap();
@@ -53,6 +54,7 @@ use crate::cli::commands::{
     LogsResponse, ProcessInfo,
 };
 use crate::config::{EnvironmentManager, GlobalConfig};
+use crate::database::Database;
 use crate::error::{Result, RunceptError};
 use crate::process::ProcessManager;
 use crate::scheduler::InactivityScheduler;
@@ -68,6 +70,7 @@ use tokio::time::Duration;
 pub struct ServerConfig {
     pub socket_path: PathBuf,
     pub global_config: GlobalConfig,
+    pub database: Option<Database>,
 }
 
 /// Main daemon server that handles RPC requests
@@ -88,8 +91,10 @@ impl DaemonServer {
             ProcessManager::new(config.global_config.clone()).await?,
         ));
 
+        // Create environment manager with optional database
+        let database_pool = config.database.as_ref().map(|db| db.get_pool().clone());
         let environment_manager = Arc::new(RwLock::new(
-            EnvironmentManager::new(config.global_config.clone()).await?,
+            EnvironmentManager::new_with_database(config.global_config.clone(), database_pool).await?,
         ));
 
         let inactivity_scheduler = Arc::new(RwLock::new(None));

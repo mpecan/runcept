@@ -2,6 +2,7 @@ use clap::Parser;
 use runcept::cli::{CliArgs, CliHandler, CliResult};
 use runcept::config::GlobalConfig;
 use runcept::daemon::{DaemonServer, ServerConfig};
+use runcept::database::Database;
 use runcept::logging;
 use std::path::PathBuf;
 use std::process;
@@ -110,10 +111,24 @@ async fn run_daemon_process(args: Vec<String>) {
 
     info!("Starting daemon process");
 
+    // Initialize database
+    let database = match setup_database(&global_config).await {
+        Ok(db) => {
+            info!("Database initialized successfully");
+            Some(db)
+        }
+        Err(e) => {
+            eprintln!("Warning: Failed to initialize database: {e}");
+            eprintln!("Continuing without database persistence...");
+            None
+        }
+    };
+
     // Create server configuration
     let server_config = ServerConfig {
         socket_path,
         global_config,
+        database,
     };
 
     // Create and run daemon server
@@ -150,4 +165,24 @@ async fn run_daemon_process(args: Vec<String>) {
     if verbose {
         println!("Daemon stopped");
     }
+}
+
+/// Set up the database for the daemon
+async fn setup_database(global_config: &GlobalConfig) -> runcept::error::Result<Database> {
+    // Use the same directory as daemon logs for the database
+    let runcept_dir = global_config.get_log_dir();
+    let database_path = runcept_dir.join("runcept.db");
+    
+    // Create the directory if it doesn't exist
+    if let Some(parent) = database_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    
+    let database_url = format!("sqlite://{}", database_path.display());
+    info!("Initializing database at: {}", database_url);
+    
+    let database = Database::new(&database_url).await?;
+    database.init().await?;
+    
+    Ok(database)
 }
