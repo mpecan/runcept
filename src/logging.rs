@@ -103,6 +103,52 @@ pub fn init_cli_logging(config: &GlobalConfig) -> Result<()> {
     Ok(())
 }
 
+/// Initialize logging for MCP server - NEVER logs to stdout/stderr
+pub fn init_mcp_logging(config: &GlobalConfig) -> Result<()> {
+    let log_level = config.logging.level.to_lowercase();
+
+    // Create the log directory
+    let log_dir = if let Some(path) = &config.logging.file_path {
+        PathBuf::from(path)
+    } else {
+        // Use default: ~/.runcept/logs/
+        let config_dir = crate::config::global::get_config_dir()?;
+        config_dir.join("logs")
+    };
+
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&log_dir).map_err(|e| {
+        RunceptError::ConfigError(format!("Failed to create log directory: {e}"))
+    })?;
+
+    let log_file_path = log_dir.join("mcp-server.log");
+
+    // Create the filter
+    let filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(&log_level))
+        .map_err(|e| RunceptError::ConfigError(format!("Invalid log level '{log_level}': {e}")))?;
+
+    // Set up the subscriber with ONLY file logging - never stdout/stderr
+    let registry = Registry::default().with(filter);
+
+    let file_appender = tracing_appender::rolling::never(&log_dir, "mcp-server.log");
+    let file_layer = fmt::layer()
+        .with_writer(file_appender)
+        .with_ansi(false)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_file(true)
+        .with_line_number(true);
+
+    registry.with(file_layer).init();
+
+    // Log to file only - never to stdout/stderr
+    info!("MCP server logging initialized with level: {}", log_level);
+    info!("MCP server log file: {}", log_file_path.display());
+
+    Ok(())
+}
+
 /// Log a structured message for daemon operations
 pub fn log_daemon_event(event: &str, details: &str) {
     info!(target: "daemon", event = event, details = details);

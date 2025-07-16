@@ -1,6 +1,0 @@
-2025-07-15 07:31:44.540 [STDOUT] 'Hello from worker' && sleep 5
-2025-07-15 07:31:44.540 [INFO] Process finished with exit status: exit status: 0
-{"timestamp":"2025-07-15T08:28:50.120565Z","level":"Stdout","message":"'Hello from worker' && sleep 5"}
-{"timestamp":"2025-07-15T08:28:50.120879Z","level":"Info","message":"Process finished with exit status: exit status: 0"}
-{"timestamp":"2025-07-15T08:30:00.903349Z","level":"Stdout","message":"'Hello from worker' && sleep 5","process_name":"worker"}
-{"timestamp":"2025-07-15T08:30:00.903537Z","level":"Info","message":"Process finished with exit status: exit status: 0","process_name":"worker"}

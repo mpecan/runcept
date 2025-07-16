@@ -613,6 +613,36 @@ impl ProjectConfig {
     pub fn get_all_process_names(&self) -> Vec<String> {
         self.processes.keys().cloned().collect()
     }
+
+    /// Create a default project configuration with a simple example process
+    pub fn create_default(project_name: &str) -> Self {
+        let mut processes = HashMap::new();
+        
+        // Add simple worker process example
+        processes.insert(
+            "worker".to_string(),
+            ProcessDefinition {
+                name: "worker".to_string(),
+                command: "echo 'Hello from worker' && sleep 5".to_string(),
+                working_dir: Some(".".to_string()),
+                auto_restart: Some(false),
+                health_check_url: None,
+                health_check_interval: None,
+                depends_on: vec![],
+                env_vars: HashMap::new(),
+            },
+        );
+
+        Self {
+            environment: ProjectEnvironmentConfig {
+                name: project_name.to_string(),
+                inactivity_timeout: Some("30m".to_string()),
+                auto_shutdown: Some(true),
+                env_vars: HashMap::new(),
+            },
+            processes,
+        }
+    }
 }
 
 pub async fn find_project_config(start_path: &Path) -> Result<Option<PathBuf>> {

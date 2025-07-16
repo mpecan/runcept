@@ -38,10 +38,11 @@ signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
 reqwest = { version = "0.12", features = ["json"] }
-rmcp = { version = "0.2.1", features = ["server", "transport-io"] }
+rmcp = { version = "0.2.1", features = ["server", "transport-io", "client","transport-child-process", "macros"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.0"
 assert_cmd = "2.0"
 predicates = "3.0"
+serde_json = "1.0"

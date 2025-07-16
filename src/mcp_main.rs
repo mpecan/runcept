@@ -8,8 +8,9 @@ async fn main() -> Result<()> {
     let server = create_mcp_server().await?;
 
     // Run the server (this will block until the server is stopped)
-    if let Err(e) = server.run().await {
-        eprintln!("MCP server error: {e}");
+    if let Err(_) = server.run().await {
+        // Don't print to stderr as it interferes with MCP protocol
+        // The error will be logged to the MCP server log file
         process::exit(1);
     }
 

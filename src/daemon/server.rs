@@ -341,6 +341,7 @@ impl ServerHandles {
             DaemonRequest::ActivateEnvironment { path } => self.activate_environment(path).await,
             DaemonRequest::DeactivateEnvironment => self.deactivate_environment().await,
             DaemonRequest::GetEnvironmentStatus => self.get_environment_status().await,
+            DaemonRequest::InitProject { path, force } => self.init_project(path, force).await,
 
             // Process commands
             DaemonRequest::StartProcess { name } => self.start_process(name).await,
@@ -493,6 +494,59 @@ impl ServerHandles {
         };
 
         Ok(DaemonResponse::EnvironmentStatus(status))
+    }
+
+    /// Initialize a new project with default configuration
+    async fn init_project(&self, path: Option<String>, force: bool) -> Result<DaemonResponse> {
+        use crate::config::project::ProjectConfig;
+        use std::path::Path;
+
+        let project_path = if let Some(p) = path {
+            Path::new(&p).to_path_buf()
+        } else {
+            std::env::current_dir().map_err(|e| {
+                RunceptError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to get current directory: {e}"),
+                ))
+            })?
+        };
+
+        let config_path = project_path.join(".runcept.toml");
+
+        // Check if config already exists
+        if config_path.exists() && !force {
+            return Ok(DaemonResponse::Error {
+                error: format!(
+                    "Configuration file already exists: {}. Use --force to overwrite.",
+                    config_path.display()
+                ),
+            });
+        }
+
+        // Get project name from directory name
+        let project_name = project_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("my-project")
+            .to_string();
+
+        // Create default configuration
+        let default_config = ProjectConfig::create_default(&project_name);
+
+        // Save the configuration
+        match default_config.save_to_path(&config_path).await {
+            Ok(()) => Ok(DaemonResponse::Success {
+                message: format!(
+                    "Initialized new runcept project '{}' in {}",
+                    project_name,
+                    project_path.display()
+                ),
+            }),
+            Err(e) => Ok(DaemonResponse::Error {
+                error: format!("Failed to create configuration file: {e}"),
+            }),
+        }
     }
 
     /// Start a process

@@ -178,6 +178,23 @@ impl CliHandler {
             }
             Commands::Deactivate => Some(DaemonRequest::DeactivateEnvironment),
             Commands::Status => Some(DaemonRequest::GetEnvironmentStatus),
+            Commands::Init { path, force } => {
+                // Convert path to absolute path for daemon
+                let absolute_path = if let Some(p) = path {
+                    std::path::Path::new(p)
+                        .canonicalize()
+                        .map(|abs_path| abs_path.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| p.clone())
+                } else {
+                    std::env::current_dir()
+                        .map(|cwd| cwd.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| ".".to_string())
+                };
+                Some(DaemonRequest::InitProject {
+                    path: Some(absolute_path),
+                    force: *force,
+                })
+            }
 
             // Process commands
             Commands::Start { name } => Some(DaemonRequest::StartProcess { name: name.clone() }),

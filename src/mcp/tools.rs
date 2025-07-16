@@ -222,8 +222,34 @@ impl RunceptTools {
         };
         let response = send_daemon_request(request).await?;
 
+        // Check if activation failed due to missing configuration
+        let final_response = match &response {
+            DaemonResponse::Error { error } if error.contains("No .runcept.toml found") => {
+                // Automatically create default configuration for MCP usage
+                let init_request = DaemonRequest::InitProject {
+                    path: Some(absolute_path.clone()),
+                    force: false,
+                };
+                
+                match send_daemon_request(init_request).await? {
+                    DaemonResponse::Success { .. } => {
+                        // Configuration created successfully, try activation again
+                        let retry_request = DaemonRequest::ActivateEnvironment {
+                            path: Some(absolute_path.clone()),
+                        };
+                        send_daemon_request(retry_request).await?
+                    }
+                    _init_error => {
+                        // Failed to create config, return original error
+                        response
+                    }
+                }
+            }
+            _ => response,
+        };
+
         // If activation was successful, update our current environment state
-        if let DaemonResponse::Success { .. } = response {
+        if let DaemonResponse::Success { .. } = final_response {
             *self.current_environment.write().await = Some(absolute_path.clone());
 
             // Record initial activity for the newly activated environment
@@ -233,7 +259,7 @@ impl RunceptTools {
             let _ = send_daemon_request(activity_request).await; // Ignore activity tracking errors
         }
 
-        let result_text = format_daemon_response(response);
+        let result_text = format_daemon_response(final_response);
         Ok(CallToolResult::success(vec![Content::text(result_text)]))
     }
 

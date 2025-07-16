@@ -119,6 +119,15 @@ pub enum Commands {
     /// Show environment and process status
     Status,
 
+    /// Initialize a new project with default .runcept.toml configuration
+    Init {
+        /// Path to project directory (defaults to current directory)
+        path: Option<String>,
+        /// Force overwrite existing .runcept.toml file
+        #[arg(short, long)]
+        force: bool,
+    },
+
     /// Process management commands
     #[group(id = "process")]
 
@@ -194,6 +203,7 @@ pub enum DaemonRequest {
     ActivateEnvironment { path: Option<String> },
     DeactivateEnvironment,
     GetEnvironmentStatus,
+    InitProject { path: Option<String>, force: bool },
 
     // Process commands
     StartProcess { name: String },

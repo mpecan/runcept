@@ -1,6 +1,6 @@
 use crate::config::GlobalConfig;
 use crate::error::{Result, RunceptError};
-use crate::logging::{init_daemon_logging, log_daemon_event};
+use crate::logging::{init_mcp_logging, log_daemon_event};
 use crate::mcp::tools::RunceptTools;
 use rmcp::service::ServiceExt;
 use rmcp::transport::io;
@@ -40,18 +40,20 @@ impl RunceptMcpServer {
 
     /// Start the MCP server
     pub async fn run(self) -> Result<()> {
-        // Initialize logging
-        init_daemon_logging(&self.config.global_config)?;
+        // Initialize MCP-specific logging (never logs to stdout/stderr)
+        init_mcp_logging(&self.config.global_config)?;
         log_daemon_event("mcp_server_start", "MCP server starting");
 
         // Create stdio transport
         let transport = io::stdio();
 
         // Serve the MCP server using the tools as the handler
-        self.tools
+        let service = self.tools
             .serve(transport)
             .await
             .map_err(|e| RunceptError::ProcessError(format!("MCP server error: {e}")))?;
+
+        service.waiting().await.map_err(|e| RunceptError::ProcessError(format!("MCP server error: {e}")))?;
 
         log_daemon_event("mcp_server_stop", "MCP server stopped");
         Ok(())
