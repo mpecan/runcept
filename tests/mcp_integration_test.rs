@@ -62,10 +62,10 @@ mod mcp_integration_tests {
         }
 
         async fn create_mcp_client(&self) -> RunningService<RoleClient, ()> {
-            let mcp_path = get_binary_path("runcept-mcp");
+            let runcept_path = get_binary_path("runcept");
             ().serve(
-                TokioChildProcess::new(Command::new(mcp_path).configure(|cmd| {
-                    cmd.env("HOME", &self.home_dir);
+                TokioChildProcess::new(Command::new(runcept_path).configure(|cmd| {
+                    cmd.arg("mcp").env("HOME", &self.home_dir);
                 }))
                 .expect("Should create MCP client process"),
             )

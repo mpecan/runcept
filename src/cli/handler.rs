@@ -66,7 +66,7 @@ mod tests {
     }
 }
 
-use crate::cli::client::{DaemonClient, check_daemon_connection};
+use crate::cli::client::DaemonClient;
 use crate::cli::commands::{CliArgs, CliResult, Commands, DaemonAction, DaemonRequest};
 use crate::error::{Result, RunceptError};
 use std::path::PathBuf;
@@ -128,10 +128,13 @@ impl CliHandler {
 
     /// Handle commands that require daemon communication
     async fn handle_daemon_request(&self, command: &Commands) -> Result<CliResult> {
-        // First check if daemon is running
-        if let Err(e) = check_daemon_connection(Some(self.client.socket_path.clone())).await {
+        // Ensure daemon is running, auto-start if necessary
+        if let Err(e) = crate::daemon::ensure_daemon_running_for_cli(
+            self.client.socket_path.clone(),
+            self.verbose,
+        ).await {
             return Ok(CliResult::Error(format!(
-                "Cannot connect to daemon: {e}\nTry running: runcept daemon start"
+                "Cannot connect to daemon and auto-start failed: {e}\nTry running: runcept daemon start"
             )));
         }
 
@@ -214,6 +217,9 @@ impl CliHandler {
 
             // Daemon commands are handled locally, not sent to daemon
             Commands::Daemon { .. } => None,
+            
+            // MCP commands are handled locally, not sent to daemon
+            Commands::Mcp => None,
         }
     }
 

@@ -1,11 +1,25 @@
 use crate::config::GlobalConfig;
 use crate::error::{Result, RunceptError};
 use std::path::PathBuf;
+use std::sync::Once;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*, registry::Registry};
 
-/// Initialize the logging system based on global configuration
-pub fn init_logging(config: &GlobalConfig) -> Result<()> {
+static LOGGER_INIT: Once = Once::new();
+
+/// Initialize the logging system for a specific component
+fn init_component_logging(config: &GlobalConfig, component: &str, log_to_stdout: bool) -> Result<()> {
+    let mut init_result = Ok(());
+    
+    LOGGER_INIT.call_once(|| {
+        init_result = init_component_logging_internal(config, component, log_to_stdout);
+    });
+    
+    init_result
+}
+
+/// Internal logging initialization (only called once)
+fn init_component_logging_internal(config: &GlobalConfig, component: &str, log_to_stdout: bool) -> Result<()> {
     let log_level = config.logging.level.to_lowercase();
 
     // Create the log directory if file logging is enabled
@@ -23,7 +37,7 @@ pub fn init_logging(config: &GlobalConfig) -> Result<()> {
             RunceptError::ConfigError(format!("Failed to create log directory: {e}"))
         })?;
 
-        Some(log_dir.join("daemon.log"))
+        Some(log_dir.join(format!("{}.log", component)))
     } else {
         None
     };
@@ -39,7 +53,7 @@ pub fn init_logging(config: &GlobalConfig) -> Result<()> {
     if let Some(ref log_path) = log_file_path {
         // File logging enabled
         let file_appender =
-            tracing_appender::rolling::never(log_path.parent().unwrap(), "daemon.log");
+            tracing_appender::rolling::never(log_path.parent().unwrap(), format!("{}.log", component));
         let file_layer = fmt::layer()
             .with_writer(file_appender)
             .with_ansi(false)
@@ -48,24 +62,35 @@ pub fn init_logging(config: &GlobalConfig) -> Result<()> {
             .with_file(true)
             .with_line_number(true);
 
-        // Also log to stdout in debug mode
-        let stdout_layer = fmt::layer()
-            .with_writer(std::io::stdout)
-            .with_ansi(true)
-            .with_target(false);
+        if log_to_stdout {
+            // Also log to stdout
+            let stdout_layer = fmt::layer()
+                .with_writer(std::io::stdout)
+                .with_ansi(true)
+                .with_target(false);
 
-        registry.with(file_layer).with(stdout_layer).init();
+            registry.with(file_layer).with(stdout_layer).init();
+        } else {
+            // File logging only
+            registry.with(file_layer).init();
+        }
     } else {
-        // Console logging only
-        let stdout_layer = fmt::layer()
-            .with_writer(std::io::stdout)
-            .with_ansi(true)
-            .with_target(false);
+        // Console logging only (if allowed)
+        if log_to_stdout {
+            let stdout_layer = fmt::layer()
+                .with_writer(std::io::stdout)
+                .with_ansi(true)
+                .with_target(false);
 
-        registry.with(stdout_layer).init();
+            registry.with(stdout_layer).init();
+        } else {
+            return Err(RunceptError::ConfigError(
+                "File logging must be enabled for components that don't support stdout".to_string(),
+            ));
+        }
     }
 
-    info!("Logging initialized with level: {}", log_level);
+    info!("{} logging initialized with level: {}", component, log_level);
     if let Some(ref log_path) = log_file_path {
         info!("Log file: {}", log_path.display());
     }
@@ -75,7 +100,7 @@ pub fn init_logging(config: &GlobalConfig) -> Result<()> {
 
 /// Initialize logging for the daemon process
 pub fn init_daemon_logging(config: &GlobalConfig) -> Result<()> {
-    init_logging(config)?;
+    init_component_logging(config, "daemon", true)?;
     info!("Daemon logging initialized");
     Ok(())
 }
@@ -93,59 +118,23 @@ pub fn init_cli_logging(config: &GlobalConfig) -> Result<()> {
         cli_config.logging.level = "info".to_string();
     }
 
-    // Disable file logging for CLI unless explicitly enabled
-    if !cli_config.logging.file_enabled {
-        cli_config.logging.file_enabled = false;
-    }
+    // Enable file logging for CLI with separate log file
+    cli_config.logging.file_enabled = true;
 
-    init_logging(&cli_config)?;
+    init_component_logging(&cli_config, "cli", true)?;
     debug!("CLI logging initialized");
     Ok(())
 }
 
 /// Initialize logging for MCP server - NEVER logs to stdout/stderr
 pub fn init_mcp_logging(config: &GlobalConfig) -> Result<()> {
-    let log_level = config.logging.level.to_lowercase();
+    // Ensure file logging is enabled for MCP
+    let mut mcp_config = config.clone();
+    mcp_config.logging.file_enabled = true;
 
-    // Create the log directory
-    let log_dir = if let Some(path) = &config.logging.file_path {
-        PathBuf::from(path)
-    } else {
-        // Use default: ~/.runcept/logs/
-        let config_dir = crate::config::global::get_config_dir()?;
-        config_dir.join("logs")
-    };
-
-    // Create directory if it doesn't exist
-    std::fs::create_dir_all(&log_dir).map_err(|e| {
-        RunceptError::ConfigError(format!("Failed to create log directory: {e}"))
-    })?;
-
-    let log_file_path = log_dir.join("mcp-server.log");
-
-    // Create the filter
-    let filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new(&log_level))
-        .map_err(|e| RunceptError::ConfigError(format!("Invalid log level '{log_level}': {e}")))?;
-
-    // Set up the subscriber with ONLY file logging - never stdout/stderr
-    let registry = Registry::default().with(filter);
-
-    let file_appender = tracing_appender::rolling::never(&log_dir, "mcp-server.log");
-    let file_layer = fmt::layer()
-        .with_writer(file_appender)
-        .with_ansi(false)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true);
-
-    registry.with(file_layer).init();
-
-    // Log to file only - never to stdout/stderr
-    info!("MCP server logging initialized with level: {}", log_level);
-    info!("MCP server log file: {}", log_file_path.display());
-
+    // MCP server never logs to stdout/stderr to avoid protocol interference
+    init_component_logging(&mcp_config, "mcp-server", false)?;
+    info!("MCP server logging initialized");
     Ok(())
 }
 

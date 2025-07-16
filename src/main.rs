@@ -1,5 +1,5 @@
 use clap::Parser;
-use runcept::cli::{CliArgs, CliHandler, CliResult};
+use runcept::cli::{CliArgs, CliHandler, CliResult, Commands};
 use runcept::config::GlobalConfig;
 use runcept::daemon::{DaemonServer, ServerConfig};
 use runcept::database::Database;
@@ -18,7 +18,7 @@ async fn main() {
         return;
     }
 
-    // Parse command line arguments for regular CLI
+    // Parse command line arguments
     let args = CliArgs::parse();
 
     // Load global configuration for logging
@@ -31,7 +31,13 @@ async fn main() {
         }
     };
 
-    // Initialize CLI logging
+    // Check if this is an MCP command
+    if matches!(args.command, Commands::Mcp) {
+        run_mcp_server(global_config).await;
+        return;
+    }
+
+    // Initialize CLI logging for regular CLI commands
     if let Err(e) = logging::init_cli_logging(&global_config) {
         eprintln!("Warning: Failed to initialize logging: {e}");
     }
@@ -55,6 +61,31 @@ async fn main() {
             eprintln!("{msg}");
             process::exit(1);
         }
+    }
+}
+
+/// Run the MCP server
+async fn run_mcp_server(global_config: GlobalConfig) {
+    // Initialize MCP logging
+    if let Err(_) = logging::init_mcp_logging(&global_config) {
+        // Can't log to stderr as it interferes with MCP protocol
+        process::exit(1);
+    }
+
+    // Create and run the MCP server
+    let server = match runcept::mcp::create_mcp_server().await {
+        Ok(server) => server,
+        Err(_) => {
+            // Error will be logged to MCP server log file
+            process::exit(1);
+        }
+    };
+
+    // Run the server (this will block until the server is stopped)
+    if let Err(_) = server.run().await {
+        // Don't print to stderr as it interferes with MCP protocol
+        // The error will be logged to the MCP server log file
+        process::exit(1);
     }
 }
 

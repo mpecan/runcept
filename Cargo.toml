@@ -16,10 +16,6 @@ readme = "README.md"
 name = "runcept"
 path = "src/main.rs"
 
-[[bin]]
-name = "runcept-mcp"
-path = "src/mcp_main.rs"
-
 [dependencies]
 tokio = { version = "1.46", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

@@ -451,8 +451,9 @@ auto_restart = true
             .success();
         
         // Start MCP server in background
-        let mut mcp_cmd = std::process::Command::new("cargo");
-        mcp_cmd.args(&["run", "--bin", "runcept-mcp"])
+        let runcept_path = get_binary_path("runcept");
+        let mut mcp_cmd = std::process::Command::new(runcept_path);
+        mcp_cmd.args(&["mcp"])
             .env("HOME", &test_env.home_dir)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -498,7 +499,8 @@ auto_restart = true
         let handles: Vec<_> = (0..5).map(|_| {
             let home_dir = test_env.home_dir.clone();
             std::thread::spawn(move || {
-                let mut cmd = Command::cargo_bin("runcept").unwrap();
+                let runcept_path = get_binary_path("runcept");
+                let mut cmd = Command::new(runcept_path);
                 cmd.env("HOME", &home_dir);
                 cmd.arg("status").assert().success();
             })

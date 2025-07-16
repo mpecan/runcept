@@ -38,7 +38,6 @@ pub fn ensure_binaries_built() {
         // Store binary paths
         let mut paths = HashMap::new();
         paths.insert("runcept".to_string(), debug_dir.join("runcept"));
-        paths.insert("runcept-mcp".to_string(), debug_dir.join("runcept-mcp"));
         
         // Verify binaries exist
         for (name, path) in &paths {

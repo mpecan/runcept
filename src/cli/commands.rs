@@ -178,6 +178,9 @@ pub enum Commands {
         #[command(subcommand)]
         action: DaemonAction,
     },
+
+    /// Start MCP (Model Context Protocol) server
+    Mcp,
 }
 
 #[derive(Subcommand, Debug)]
