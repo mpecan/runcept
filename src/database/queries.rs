@@ -10,7 +10,7 @@ mod tests {
         db.init().await.unwrap();
 
         let manager = QueryManager::new(db.get_pool());
-        assert!(manager.pool.is_closed() == false);
+        assert!(!manager.pool.is_closed());
     }
 
     #[tokio::test]
@@ -241,14 +241,14 @@ impl<'a> QueryManager<'a> {
     /// Insert a new environment into the database
     pub async fn insert_environment(&self, env: &Environment) -> Result<()> {
         let config_path = env.project_path.join(".runcept.toml");
-        
+
         sqlx::query(
             r#"
             INSERT INTO environments (
                 id, name, description, project_path, config_path, status, 
                 created_at, updated_at, last_activity, inactivity_timeout, auto_shutdown
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#
+            "#,
         )
         .bind(&env.id)
         .bind(&env.name)
@@ -259,8 +259,20 @@ impl<'a> QueryManager<'a> {
         .bind(env.created_at)
         .bind(env.updated_at)
         .bind(env.last_activity)
-        .bind(env.project_config.environment.inactivity_timeout.as_ref().and_then(|t| t.parse::<u32>().ok()).map(|t| t as i32))
-        .bind(env.project_config.environment.auto_shutdown.unwrap_or(false))
+        .bind(
+            env.project_config
+                .environment
+                .inactivity_timeout
+                .as_ref()
+                .and_then(|t| t.parse::<u32>().ok())
+                .map(|t| t as i32),
+        )
+        .bind(
+            env.project_config
+                .environment
+                .auto_shutdown
+                .unwrap_or(false),
+        )
         .execute(self.pool)
         .await?;
 
@@ -275,15 +287,27 @@ impl<'a> QueryManager<'a> {
                 name = ?, description = ?, status = ?, updated_at = ?, 
                 last_activity = ?, inactivity_timeout = ?, auto_shutdown = ?
             WHERE id = ?
-            "#
+            "#,
         )
         .bind(&env.name)
         .bind(env.project_config.environment.name.as_str())
         .bind(env.status.to_string())
         .bind(env.updated_at)
         .bind(env.last_activity)
-        .bind(env.project_config.environment.inactivity_timeout.as_ref().and_then(|t| t.parse::<u32>().ok()).map(|t| t as i32))
-        .bind(env.project_config.environment.auto_shutdown.unwrap_or(false))
+        .bind(
+            env.project_config
+                .environment
+                .inactivity_timeout
+                .as_ref()
+                .and_then(|t| t.parse::<u32>().ok())
+                .map(|t| t as i32),
+        )
+        .bind(
+            env.project_config
+                .environment
+                .auto_shutdown
+                .unwrap_or(false),
+        )
         .bind(&env.id)
         .execute(self.pool)
         .await?;
@@ -298,7 +322,7 @@ impl<'a> QueryManager<'a> {
             SELECT id, name, description, project_path, config_path, status, 
                    created_at, updated_at, last_activity, inactivity_timeout, auto_shutdown
             FROM environments WHERE id = ?
-            "#
+            "#,
         )
         .bind(id)
         .fetch_optional(self.pool)
@@ -319,7 +343,7 @@ impl<'a> QueryManager<'a> {
             SELECT id, name, description, project_path, config_path, status, 
                    created_at, updated_at, last_activity, inactivity_timeout, auto_shutdown
             FROM environments WHERE project_path = ?
-            "#
+            "#,
         )
         .bind(project_path)
         .fetch_optional(self.pool)
@@ -340,7 +364,7 @@ impl<'a> QueryManager<'a> {
             SELECT id, name, description, project_path, config_path, status, 
                    created_at, updated_at, last_activity, inactivity_timeout, auto_shutdown
             FROM environments ORDER BY updated_at DESC
-            "#
+            "#,
         )
         .fetch_all(self.pool)
         .await?;
@@ -379,7 +403,7 @@ impl<'a> QueryManager<'a> {
 
     /// Search environments by name or description
     pub async fn search_environments(&self, query: &str) -> Result<Vec<Environment>> {
-        let search_pattern = format!("%{}%", query);
+        let search_pattern = format!("%{query}%");
         let rows = sqlx::query(
             r#"
             SELECT id, name, description, project_path, config_path, status, 
@@ -387,7 +411,7 @@ impl<'a> QueryManager<'a> {
             FROM environments 
             WHERE name LIKE ? OR description LIKE ? OR project_path LIKE ?
             ORDER BY updated_at DESC
-            "#
+            "#,
         )
         .bind(&search_pattern)
         .bind(&search_pattern)
@@ -405,13 +429,16 @@ impl<'a> QueryManager<'a> {
     }
 
     /// Get environments by status
-    pub async fn get_environments_by_status(&self, status: EnvironmentStatus) -> Result<Vec<Environment>> {
+    pub async fn get_environments_by_status(
+        &self,
+        status: EnvironmentStatus,
+    ) -> Result<Vec<Environment>> {
         let rows = sqlx::query(
             r#"
             SELECT id, name, description, project_path, config_path, status, 
                    created_at, updated_at, last_activity, inactivity_timeout, auto_shutdown
             FROM environments WHERE status = ? ORDER BY updated_at DESC
-            "#
+            "#,
         )
         .bind(status.to_string())
         .fetch_all(self.pool)
@@ -430,10 +457,12 @@ impl<'a> QueryManager<'a> {
     async fn row_to_environment(&self, row: sqlx::sqlite::SqliteRow) -> Result<Environment> {
         let project_path: String = row.get("project_path");
         let config_path: String = row.get("config_path");
-        
+
         // Load the project config from file
         let project_config = if std::path::Path::new(&config_path).exists() {
-            ProjectConfig::load_from_path(std::path::Path::new(&config_path)).await.unwrap_or_default()
+            ProjectConfig::load_from_path(std::path::Path::new(&config_path))
+                .await
+                .unwrap_or_default()
         } else {
             ProjectConfig::default()
         };

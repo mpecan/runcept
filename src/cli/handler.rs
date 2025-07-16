@@ -132,7 +132,9 @@ impl CliHandler {
         if let Err(e) = crate::daemon::ensure_daemon_running_for_cli(
             self.client.socket_path.clone(),
             self.verbose,
-        ).await {
+        )
+        .await
+        {
             return Ok(CliResult::Error(format!(
                 "Cannot connect to daemon and auto-start failed: {e}\nTry running: runcept daemon start"
             )));
@@ -217,7 +219,7 @@ impl CliHandler {
 
             // Daemon commands are handled locally, not sent to daemon
             Commands::Daemon { .. } => None,
-            
+
             // MCP commands are handled locally, not sent to daemon
             Commands::Mcp => None,
         }

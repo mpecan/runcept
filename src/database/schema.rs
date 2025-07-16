@@ -7,7 +7,7 @@ mod tests {
     async fn test_database_connection() {
         let temp_file = NamedTempFile::new().unwrap();
         let db_path = temp_file.path().to_str().unwrap();
-        let db_url = format!("sqlite://{}", db_path);
+        let db_url = format!("sqlite://{db_path}");
 
         let db = Database::new(&db_url).await;
         assert!(db.is_ok());

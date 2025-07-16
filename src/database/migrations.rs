@@ -7,7 +7,7 @@ mod tests {
     async fn test_migration_manager_creation() {
         let db = Database::new("sqlite::memory:").await.unwrap();
         let manager = MigrationManager::new(db.get_pool());
-        assert!(manager.pool.is_closed() == false);
+        assert!(!manager.pool.is_closed());
     }
 
     #[tokio::test]

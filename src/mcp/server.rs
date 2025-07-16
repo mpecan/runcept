@@ -47,25 +47,32 @@ impl RunceptMcpServer {
         // Ensure daemon is running at startup
         let config_dir = crate::config::global::get_config_dir()?;
         let socket_path = config_dir.join("daemon.sock");
-        
+
         if let Err(e) = crate::daemon::ensure_daemon_running_for_mcp(socket_path).await {
             return Err(RunceptError::ProcessError(format!(
                 "Failed to ensure daemon is running during MCP startup: {e}"
             )));
         }
 
-        log_daemon_event("mcp_server_daemon_ready", "Daemon is ready for MCP requests");
+        log_daemon_event(
+            "mcp_server_daemon_ready",
+            "Daemon is ready for MCP requests",
+        );
 
         // Create stdio transport
         let transport = io::stdio();
 
         // Serve the MCP server using the tools as the handler
-        let service = self.tools
+        let service = self
+            .tools
             .serve(transport)
             .await
             .map_err(|e| RunceptError::ProcessError(format!("MCP server error: {e}")))?;
 
-        service.waiting().await.map_err(|e| RunceptError::ProcessError(format!("MCP server error: {e}")))?;
+        service
+            .waiting()
+            .await
+            .map_err(|e| RunceptError::ProcessError(format!("MCP server error: {e}")))?;
 
         log_daemon_event("mcp_server_stop", "MCP server stopped");
         Ok(())

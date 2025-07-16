@@ -168,6 +168,58 @@ pub struct NameParam {
     pub name: String,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AddProcessParam {
+    /// Name of the process to add
+    pub name: String,
+    /// Command to execute
+    pub command: String,
+    /// Working directory (optional)
+    pub working_dir: Option<String>,
+    /// Whether to auto-restart the process
+    pub auto_restart: Option<bool>,
+    /// Health check URL (optional)
+    pub health_check_url: Option<String>,
+    /// Health check interval in seconds (optional)
+    pub health_check_interval: Option<u32>,
+    /// Environment variables (optional)
+    pub env_vars: Option<std::collections::HashMap<String, String>>,
+    /// Processes this one depends on (optional)
+    pub depends_on: Option<Vec<String>>,
+    /// Override environment (optional)
+    pub environment: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RemoveProcessParam {
+    /// Name of the process to remove
+    pub name: String,
+    /// Override environment (optional)
+    pub environment: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateProcessParam {
+    /// Name of the process to update
+    pub name: String,
+    /// Command to execute
+    pub command: String,
+    /// Working directory (optional)
+    pub working_dir: Option<String>,
+    /// Whether to auto-restart the process
+    pub auto_restart: Option<bool>,
+    /// Health check URL (optional)
+    pub health_check_url: Option<String>,
+    /// Health check interval in seconds (optional)
+    pub health_check_interval: Option<u32>,
+    /// Environment variables (optional)
+    pub env_vars: Option<std::collections::HashMap<String, String>>,
+    /// Processes this one depends on (optional)
+    pub depends_on: Option<Vec<String>>,
+    /// Override environment (optional)
+    pub environment: Option<String>,
+}
+
 impl Default for RunceptTools {
     fn default() -> Self {
         Self::new()
@@ -230,7 +282,7 @@ impl RunceptTools {
                     path: Some(absolute_path.clone()),
                     force: false,
                 };
-                
+
                 match send_daemon_request(init_request).await? {
                     DaemonResponse::Success { .. } => {
                         // Configuration created successfully, try activation again
@@ -413,6 +465,105 @@ impl RunceptTools {
                 "No active environment to record activity for".to_string(),
             )]))
         }
+    }
+
+    /// Add a new process to the project configuration
+    #[tool(description = "Add a new process to the project configuration")]
+    async fn add_process(
+        &self,
+        Parameters(AddProcessParam {
+            name,
+            command,
+            working_dir,
+            auto_restart,
+            health_check_url,
+            health_check_interval,
+            env_vars,
+            depends_on,
+            environment,
+        }): Parameters<AddProcessParam>,
+    ) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
+        // Create ProcessDefinition from parameters
+        let process_def = crate::config::ProcessDefinition {
+            name: name.clone(),
+            command,
+            working_dir,
+            auto_restart,
+            health_check_url,
+            health_check_interval,
+            depends_on: depends_on.unwrap_or_default(),
+            env_vars: env_vars.unwrap_or_default(),
+        };
+
+        let request = DaemonRequest::AddProcess {
+            process: process_def,
+            environment,
+        };
+        let response = send_daemon_request(request).await?;
+
+        let result_text = format_daemon_response(response);
+        Ok(CallToolResult::success(vec![Content::text(result_text)]))
+    }
+
+    /// Remove a process from the project configuration
+    #[tool(description = "Remove a process from the project configuration")]
+    async fn remove_process(
+        &self,
+        Parameters(RemoveProcessParam { name, environment }): Parameters<RemoveProcessParam>,
+    ) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
+        let request = DaemonRequest::RemoveProcess { name, environment };
+        let response = send_daemon_request(request).await?;
+
+        let result_text = format_daemon_response(response);
+        Ok(CallToolResult::success(vec![Content::text(result_text)]))
+    }
+
+    /// Update an existing process in the project configuration
+    #[tool(description = "Update an existing process in the project configuration")]
+    async fn update_process(
+        &self,
+        Parameters(UpdateProcessParam {
+            name,
+            command,
+            working_dir,
+            auto_restart,
+            health_check_url,
+            health_check_interval,
+            env_vars,
+            depends_on,
+            environment,
+        }): Parameters<UpdateProcessParam>,
+    ) -> Result<CallToolResult, McpError> {
+        // Record activity for the current environment
+        let _ = self.record_current_environment_activity().await;
+
+        // Create ProcessDefinition from parameters
+        let process_def = crate::config::ProcessDefinition {
+            name: name.clone(),
+            command,
+            working_dir,
+            auto_restart,
+            health_check_url,
+            health_check_interval,
+            depends_on: depends_on.unwrap_or_default(),
+            env_vars: env_vars.unwrap_or_default(),
+        };
+
+        let request = DaemonRequest::UpdateProcess {
+            name,
+            process: process_def,
+            environment,
+        };
+        let response = send_daemon_request(request).await?;
+
+        let result_text = format_daemon_response(response);
+        Ok(CallToolResult::success(vec![Content::text(result_text)]))
     }
 }
 

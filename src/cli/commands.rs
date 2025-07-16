@@ -5,7 +5,7 @@ mod tests {
     #[test]
     fn test_cli_args_parsing() {
         // Test environment commands
-        let args = CliArgs::try_parse_from(&["runcept", "activate", "/path/to/project"]).unwrap();
+        let args = CliArgs::try_parse_from(["runcept", "activate", "/path/to/project"]).unwrap();
         match args.command {
             Commands::Activate { path } => {
                 assert_eq!(path, Some("/path/to/project".to_string()));
@@ -14,7 +14,7 @@ mod tests {
         }
 
         // Test process commands
-        let args = CliArgs::try_parse_from(&["runcept", "start", "web-server"]).unwrap();
+        let args = CliArgs::try_parse_from(["runcept", "start", "web-server"]).unwrap();
         match args.command {
             Commands::Start { name } => {
                 assert_eq!(name, "web-server");
@@ -23,7 +23,7 @@ mod tests {
         }
 
         // Test global commands
-        let args = CliArgs::try_parse_from(&["runcept", "ps"]).unwrap();
+        let args = CliArgs::try_parse_from(["runcept", "ps"]).unwrap();
         match args.command {
             Commands::Ps => {}
             _ => panic!("Expected Ps command"),
@@ -33,7 +33,7 @@ mod tests {
     #[test]
     fn test_logs_command_parsing() {
         // Test logs with follow
-        let args = CliArgs::try_parse_from(&[
+        let args = CliArgs::try_parse_from([
             "runcept",
             "logs",
             "web-server",
@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn test_daemon_commands() {
         // Test daemon start
-        let args = CliArgs::try_parse_from(&["runcept", "daemon", "start"]).unwrap();
+        let args = CliArgs::try_parse_from(["runcept", "daemon", "start"]).unwrap();
         match args.command {
             Commands::Daemon { action } => match action {
                 DaemonAction::Start { foreground: _ } => {}
@@ -69,7 +69,7 @@ mod tests {
         }
 
         // Test daemon status
-        let args = CliArgs::try_parse_from(&["runcept", "daemon", "status"]).unwrap();
+        let args = CliArgs::try_parse_from(["runcept", "daemon", "status"]).unwrap();
         match args.command {
             Commands::Daemon { action } => match action {
                 DaemonAction::Status => {}
@@ -80,6 +80,7 @@ mod tests {
     }
 }
 
+use crate::config::project::ProcessDefinition;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -203,17 +204,31 @@ pub enum DaemonAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DaemonRequest {
     // Environment commands
-    ActivateEnvironment { path: Option<String> },
+    ActivateEnvironment {
+        path: Option<String>,
+    },
     DeactivateEnvironment,
     GetEnvironmentStatus,
-    InitProject { path: Option<String>, force: bool },
+    InitProject {
+        path: Option<String>,
+        force: bool,
+    },
 
     // Process commands
-    StartProcess { name: String },
-    StopProcess { name: String },
-    RestartProcess { name: String },
+    StartProcess {
+        name: String,
+    },
+    StopProcess {
+        name: String,
+    },
+    RestartProcess {
+        name: String,
+    },
     ListProcesses,
-    GetProcessLogs { name: String, lines: Option<usize> },
+    GetProcessLogs {
+        name: String,
+        lines: Option<usize>,
+    },
 
     // Global commands
     ListAllProcesses,
@@ -224,7 +239,24 @@ pub enum DaemonRequest {
     Shutdown,
 
     // Activity tracking commands
-    RecordEnvironmentActivity { environment_id: String },
+    RecordEnvironmentActivity {
+        environment_id: String,
+    },
+
+    // Dynamic process management commands
+    AddProcess {
+        process: ProcessDefinition,
+        environment: Option<String>, // Optional environment override
+    },
+    RemoveProcess {
+        name: String,
+        environment: Option<String>, // Optional environment override
+    },
+    UpdateProcess {
+        name: String,
+        process: ProcessDefinition,
+        environment: Option<String>, // Optional environment override
+    },
 }
 
 /// Response types for daemon communication

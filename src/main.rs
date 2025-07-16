@@ -67,7 +67,7 @@ async fn main() {
 /// Run the MCP server
 async fn run_mcp_server(global_config: GlobalConfig) {
     // Initialize MCP logging
-    if let Err(_) = logging::init_mcp_logging(&global_config) {
+    if logging::init_mcp_logging(&global_config).is_err() {
         // Can't log to stderr as it interferes with MCP protocol
         process::exit(1);
     }
@@ -82,7 +82,7 @@ async fn run_mcp_server(global_config: GlobalConfig) {
     };
 
     // Run the server (this will block until the server is stopped)
-    if let Err(_) = server.run().await {
+    if server.run().await.is_err() {
         // Don't print to stderr as it interferes with MCP protocol
         // The error will be logged to the MCP server log file
         process::exit(1);
@@ -203,17 +203,17 @@ async fn setup_database(global_config: &GlobalConfig) -> runcept::error::Result<
     // Use the same directory as daemon logs for the database
     let runcept_dir = global_config.get_log_dir();
     let database_path = runcept_dir.join("runcept.db");
-    
+
     // Create the directory if it doesn't exist
     if let Some(parent) = database_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    
+
     let database_url = format!("sqlite://{}", database_path.display());
     info!("Initializing database at: {}", database_url);
-    
+
     let database = Database::new(&database_url).await?;
     database.init().await?;
-    
+
     Ok(database)
 }

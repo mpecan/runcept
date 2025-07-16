@@ -617,7 +617,7 @@ impl ProjectConfig {
     /// Create a default project configuration with a simple example process
     pub fn create_default(project_name: &str) -> Self {
         let mut processes = HashMap::new();
-        
+
         // Add simple worker process example
         processes.insert(
             "worker".to_string(),

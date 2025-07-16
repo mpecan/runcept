@@ -8,18 +8,26 @@ use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*, registry::Registry}
 static LOGGER_INIT: Once = Once::new();
 
 /// Initialize the logging system for a specific component
-fn init_component_logging(config: &GlobalConfig, component: &str, log_to_stdout: bool) -> Result<()> {
+fn init_component_logging(
+    config: &GlobalConfig,
+    component: &str,
+    log_to_stdout: bool,
+) -> Result<()> {
     let mut init_result = Ok(());
-    
+
     LOGGER_INIT.call_once(|| {
         init_result = init_component_logging_internal(config, component, log_to_stdout);
     });
-    
+
     init_result
 }
 
 /// Internal logging initialization (only called once)
-fn init_component_logging_internal(config: &GlobalConfig, component: &str, log_to_stdout: bool) -> Result<()> {
+fn init_component_logging_internal(
+    config: &GlobalConfig,
+    component: &str,
+    log_to_stdout: bool,
+) -> Result<()> {
     let log_level = config.logging.level.to_lowercase();
 
     // Create the log directory if file logging is enabled
@@ -37,7 +45,7 @@ fn init_component_logging_internal(config: &GlobalConfig, component: &str, log_t
             RunceptError::ConfigError(format!("Failed to create log directory: {e}"))
         })?;
 
-        Some(log_dir.join(format!("{}.log", component)))
+        Some(log_dir.join(format!("{component}.log")))
     } else {
         None
     };
@@ -52,8 +60,10 @@ fn init_component_logging_internal(config: &GlobalConfig, component: &str, log_t
 
     if let Some(ref log_path) = log_file_path {
         // File logging enabled
-        let file_appender =
-            tracing_appender::rolling::never(log_path.parent().unwrap(), format!("{}.log", component));
+        let file_appender = tracing_appender::rolling::never(
+            log_path.parent().unwrap(),
+            format!("{component}.log"),
+        );
         let file_layer = fmt::layer()
             .with_writer(file_appender)
             .with_ansi(false)
@@ -90,7 +100,10 @@ fn init_component_logging_internal(config: &GlobalConfig, component: &str, log_t
         }
     }
 
-    info!("{} logging initialized with level: {}", component, log_level);
+    info!(
+        "{} logging initialized with level: {}",
+        component, log_level
+    );
     if let Some(ref log_path) = log_file_path {
         info!("Log file: {}", log_path.display());
     }

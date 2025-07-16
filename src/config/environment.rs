@@ -28,7 +28,7 @@ mod tests {
         assert_eq!(env.project_path, project_path);
         assert_eq!(env.status, EnvironmentStatus::Inactive);
         assert!(env.processes.is_empty());
-        assert!(env.id.len() > 0);
+        assert!(!env.id.is_empty());
     }
 
     #[test]
@@ -503,9 +503,11 @@ impl EnvironmentManager {
 
     pub async fn register_project(&mut self, project_path: &Path) -> Result<String> {
         // First check if we already have this environment in database
-        let absolute_path = project_path.canonicalize().unwrap_or_else(|_| project_path.to_path_buf());
+        let absolute_path = project_path
+            .canonicalize()
+            .unwrap_or_else(|_| project_path.to_path_buf());
         let path_str = absolute_path.to_string_lossy().to_string();
-        
+
         if let Some(pool) = &self.database_pool {
             let query_manager = QueryManager::new(pool);
             if let Some(existing_env) = query_manager.get_environment_by_path(&path_str).await? {
@@ -536,10 +538,10 @@ impl EnvironmentManager {
         );
 
         let env_id = environment.id.clone();
-        
+
         // Save to database first
         self.save_environment_to_database(&environment).await?;
-        
+
         // Then store in memory
         self.environments.insert(env_id.clone(), environment);
 
@@ -556,7 +558,7 @@ impl EnvironmentManager {
             // Transition to activating
             environment.transition_to(EnvironmentStatus::Activating);
         }
-        
+
         // Save intermediate state
         if let Some(environment) = self.environments.get(env_id) {
             self.save_environment_to_database(environment).await?;
@@ -573,7 +575,7 @@ impl EnvironmentManager {
             environment.transition_to(EnvironmentStatus::Active);
             environment.update_activity();
         }
-        
+
         // Persist final changes to database
         if let Some(environment) = self.environments.get(env_id) {
             self.save_environment_to_database(environment).await?;
@@ -592,7 +594,7 @@ impl EnvironmentManager {
             // Transition to deactivating
             environment.transition_to(EnvironmentStatus::Deactivating);
         }
-        
+
         // Save intermediate state
         if let Some(environment) = self.environments.get(env_id) {
             self.save_environment_to_database(environment).await?;
@@ -608,7 +610,7 @@ impl EnvironmentManager {
             // For now, just mark as inactive
             environment.transition_to(EnvironmentStatus::Inactive);
         }
-        
+
         // Persist final changes to database
         if let Some(environment) = self.environments.get(env_id) {
             self.save_environment_to_database(environment).await?;
@@ -683,12 +685,12 @@ impl EnvironmentManager {
         if let Some(environment) = self.environments.get_mut(env_id) {
             environment.update_activity();
         }
-        
+
         // Then save to database
         if let Some(environment) = self.environments.get(env_id) {
             self.save_environment_to_database(environment).await?;
         }
-        
+
         Ok(())
     }
 
@@ -714,7 +716,7 @@ impl EnvironmentManager {
         for env_id in inactive_env_ids {
             // Remove from database first
             self.remove_environment_from_database(&env_id).await?;
-            
+
             // Then remove from memory
             self.environments.remove(&env_id);
             cleaned_up.push(env_id);
@@ -750,9 +752,13 @@ impl EnvironmentManager {
     async fn save_environment_to_database(&self, environment: &Environment) -> Result<()> {
         if let Some(pool) = &self.database_pool {
             let query_manager = QueryManager::new(pool);
-            
+
             // Check if environment already exists
-            if query_manager.get_environment_by_id(&environment.id).await?.is_some() {
+            if query_manager
+                .get_environment_by_id(&environment.id)
+                .await?
+                .is_some()
+            {
                 query_manager.update_environment(environment).await?;
             } else {
                 query_manager.insert_environment(environment).await?;
@@ -760,7 +766,6 @@ impl EnvironmentManager {
         }
         Ok(())
     }
-
 
     /// Remove environment from database
     async fn remove_environment_from_database(&self, env_id: &str) -> Result<()> {
@@ -783,7 +788,8 @@ impl EnvironmentManager {
                 .values()
                 .filter(|env| {
                     env.name.to_lowercase().contains(&query.to_lowercase())
-                        || env.project_path
+                        || env
+                            .project_path
                             .to_string_lossy()
                             .to_lowercase()
                             .contains(&query.to_lowercase())
@@ -795,7 +801,10 @@ impl EnvironmentManager {
     }
 
     /// Get environments by status from database
-    pub async fn get_environments_by_status(&self, status: EnvironmentStatus) -> Result<Vec<Environment>> {
+    pub async fn get_environments_by_status(
+        &self,
+        status: EnvironmentStatus,
+    ) -> Result<Vec<Environment>> {
         if let Some(pool) = &self.database_pool {
             let query_manager = QueryManager::new(pool);
             query_manager.get_environments_by_status(status).await

@@ -1,6 +1,5 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -79,17 +78,17 @@ auto_restart = true
         fn start_daemon(&self) -> std::process::Child {
             let runcept_path = get_binary_path("runcept");
             let mut cmd = std::process::Command::new(runcept_path);
-            cmd.args(&["daemon", "start"])
+            cmd.args(["daemon", "start"])
                 .env("HOME", &self.home_dir)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
-            
+
             cmd.spawn().expect("Failed to start daemon")
         }
 
         fn wait_for_daemon(&self) {
             let socket_path = self.runcept_dir.join("daemon.sock");
-            
+
             // Wait up to 5 seconds for daemon to start
             for _ in 0..50 {
                 if socket_path.exists() {
@@ -102,9 +101,7 @@ auto_restart = true
 
         fn stop_daemon(&self) {
             // Send shutdown command
-            let _ = self.runcept_cmd()
-                .args(&["daemon", "stop"])
-                .output();
+            let _ = self.runcept_cmd().args(["daemon", "stop"]).output();
         }
     }
 
@@ -119,8 +116,9 @@ auto_restart = true
     #[test]
     fn test_cli_help_command() {
         let test_env = TestEnvironment::new();
-        
-        test_env.runcept_cmd()
+
+        test_env
+            .runcept_cmd()
             .arg("--help")
             .assert()
             .success()
@@ -133,21 +131,22 @@ auto_restart = true
     #[test]
     fn test_daemon_startup_and_status() {
         let test_env = TestEnvironment::new();
-        
+
         // Start daemon
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Test daemon status
-        test_env.runcept_cmd()
-            .args(&["daemon", "status"])
+        test_env
+            .runcept_cmd()
+            .args(["daemon", "status"])
             .assert()
             .success()
             .stdout(predicate::str::contains("Running"));
-        
+
         // Test that socket file exists
         assert!(test_env.runcept_dir.join("daemon.sock").exists());
-        
+
         // Stop daemon
         test_env.stop_daemon();
         let _ = daemon_process.wait();
@@ -157,32 +156,35 @@ auto_restart = true
     fn test_environment_activation_via_cli() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         // Start daemon
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Test activation
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success()
             .stdout(predicate::str::contains("activated"));
-        
+
         // Test status shows active environment
-        test_env.runcept_cmd()
+        test_env
+            .runcept_cmd()
             .arg("status")
             .assert()
             .success()
             .stdout(predicate::str::contains("binary-test-project"));
-        
+
         // Test deactivation
-        test_env.runcept_cmd()
+        test_env
+            .runcept_cmd()
             .arg("deactivate")
             .assert()
             .success()
             .stdout(predicate::str::contains("deactivated"));
-        
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
     }
@@ -191,43 +193,47 @@ auto_restart = true
     fn test_process_management_via_cli() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         // Start daemon
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Activate environment
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success();
-        
+
         // Start a process
-        test_env.runcept_cmd()
-            .args(&["start", "worker"])
+        test_env
+            .runcept_cmd()
+            .args(["start", "worker"])
             .assert()
             .success()
             .stdout(predicate::str::contains("started").or(predicate::str::contains("Starting")));
-        
+
         // Wait a moment for process to run
         std::thread::sleep(Duration::from_millis(500));
-        
+
         // List processes
-        test_env.runcept_cmd()
+        test_env
+            .runcept_cmd()
             .arg("list")
             .assert()
             .success()
             .stdout(predicate::str::contains("worker"));
-        
+
         // Wait for worker to complete and get logs
         std::thread::sleep(Duration::from_secs(4));
-        
-        test_env.runcept_cmd()
-            .args(&["logs", "worker"])
+
+        test_env
+            .runcept_cmd()
+            .args(["logs", "worker"])
             .assert()
             .success()
             .stdout(predicate::str::contains("Worker started"));
-        
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
     }
@@ -236,36 +242,38 @@ auto_restart = true
     fn test_daemon_persistence_across_restarts() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         // First daemon instance
         {
             let mut daemon_process = test_env.start_daemon();
             test_env.wait_for_daemon();
-            
+
             // Activate environment
-            test_env.runcept_cmd()
-                .args(&["activate", test_env.project_dir.to_str().unwrap()])
+            test_env
+                .runcept_cmd()
+                .args(["activate", test_env.project_dir.to_str().unwrap()])
                 .assert()
                 .success();
-            
+
             // Stop daemon
             test_env.stop_daemon();
             let _ = daemon_process.wait();
             std::thread::sleep(Duration::from_millis(500));
         }
-        
+
         // Second daemon instance
         {
             let mut daemon_process = test_env.start_daemon();
             test_env.wait_for_daemon();
-            
+
             // Check that we can reactivate the same environment
-            test_env.runcept_cmd()
-                .args(&["activate", test_env.project_dir.to_str().unwrap()])
+            test_env
+                .runcept_cmd()
+                .args(["activate", test_env.project_dir.to_str().unwrap()])
                 .assert()
                 .success()
                 .stdout(predicate::str::contains("activated"));
-            
+
             test_env.stop_daemon();
             let _ = daemon_process.wait();
         }
@@ -275,51 +283,53 @@ auto_restart = true
     fn test_multiple_process_operations() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Activate environment
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success();
-        
+
         // Start multiple processes
-        test_env.runcept_cmd()
-            .args(&["start", "worker"])
+        test_env
+            .runcept_cmd()
+            .args(["start", "worker"])
             .assert()
             .success();
-        
-        test_env.runcept_cmd()
-            .args(&["start", "background"])
+
+        test_env
+            .runcept_cmd()
+            .args(["start", "background"])
             .assert()
             .success();
-        
+
         std::thread::sleep(Duration::from_millis(200));
-        
+
         // List all processes
-        test_env.runcept_cmd()
+        test_env
+            .runcept_cmd()
             .arg("list")
             .assert()
             .success()
             .stdout(predicate::str::contains("worker"))
             .stdout(predicate::str::contains("background"));
-        
+
         // Stop specific process
-        test_env.runcept_cmd()
-            .args(&["stop", "background"])
+        test_env
+            .runcept_cmd()
+            .args(["stop", "background"])
             .assert()
             .success();
-        
+
         std::thread::sleep(Duration::from_millis(100));
-        
+
         // Verify process is stopped
-        test_env.runcept_cmd()
-            .arg("list")
-            .assert()
-            .success();
-        
+        test_env.runcept_cmd().arg("list").assert().success();
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
     }
@@ -328,43 +338,53 @@ auto_restart = true
     fn test_error_handling_via_cli() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Test activating non-existent environment
-        test_env.runcept_cmd()
-            .args(&["activate", "/non/existent/path"])
+        test_env
+            .runcept_cmd()
+            .args(["activate", "/non/existent/path"])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("No .runcept.toml found")
-                   .or(predicate::str::contains("not found"))
-                   .or(predicate::str::contains("error")));
-        
+            .stderr(
+                predicate::str::contains("No .runcept.toml found")
+                    .or(predicate::str::contains("not found"))
+                    .or(predicate::str::contains("error")),
+            );
+
         // Test starting process without active environment
-        test_env.runcept_cmd()
-            .args(&["start", "worker"])
+        test_env
+            .runcept_cmd()
+            .args(["start", "worker"])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("No active environment")
-                   .or(predicate::str::contains("not activated"))
-                   .or(predicate::str::contains("error")));
-        
+            .stderr(
+                predicate::str::contains("No active environment")
+                    .or(predicate::str::contains("not activated"))
+                    .or(predicate::str::contains("error")),
+            );
+
         // Activate environment
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success();
-        
+
         // Test starting non-existent process
-        test_env.runcept_cmd()
-            .args(&["start", "nonexistent"])
+        test_env
+            .runcept_cmd()
+            .args(["start", "nonexistent"])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("not found")
-                   .or(predicate::str::contains("No process")
-                   .or(predicate::str::contains("error"))));
-        
+            .stderr(
+                predicate::str::contains("not found")
+                    .or(predicate::str::contains("No process")
+                        .or(predicate::str::contains("error"))),
+            );
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
     }
@@ -373,32 +393,34 @@ auto_restart = true
     fn test_database_functionality() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         // Start daemon
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Activate environment to trigger database operations
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success();
-        
+
         // Verify environment is active
-        test_env.runcept_cmd()
+        test_env
+            .runcept_cmd()
             .arg("status")
             .assert()
             .success()
             .stdout(predicate::str::contains("binary-test-project"));
-        
+
         // Check that runcept directory exists and has expected structure
         assert!(test_env.runcept_dir.exists());
         assert!(test_env.runcept_dir.join("logs").exists());
         assert!(test_env.runcept_dir.join("daemon.sock").exists());
-        
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
-        
+
         // Runcept directory should persist after shutdown
         assert!(test_env.runcept_dir.exists());
     }
@@ -407,30 +429,36 @@ auto_restart = true
     fn test_log_file_creation() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Activate and run a process
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success();
-        
-        test_env.runcept_cmd()
-            .args(&["start", "worker"])
+
+        test_env
+            .runcept_cmd()
+            .args(["start", "worker"])
             .assert()
             .success();
-        
+
         std::thread::sleep(Duration::from_secs(4));
-        
+
         // Check that log files are created
         let daemon_log = test_env.runcept_dir.join("logs").join("daemon.log");
-        let worker_log = test_env.project_dir.join(".runcept").join("logs").join("worker.log");
-        
+        let worker_log = test_env
+            .project_dir
+            .join(".runcept")
+            .join("logs")
+            .join("worker.log");
+
         assert!(daemon_log.exists(), "Daemon log file should be created");
         assert!(worker_log.exists(), "Process log file should be created");
-        
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
     }
@@ -439,44 +467,46 @@ auto_restart = true
     async fn test_mcp_server_binary() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         // Start daemon first
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Activate environment
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success();
-        
+
         // Start MCP server in background
         let runcept_path = get_binary_path("runcept");
         let mut mcp_cmd = std::process::Command::new(runcept_path);
-        mcp_cmd.args(&["mcp"])
+        mcp_cmd
+            .args(["mcp"])
             .env("HOME", &test_env.home_dir)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null());
-        
+
         let mut mcp_process = mcp_cmd.spawn().expect("Failed to start MCP server");
-        
+
         // Give MCP server time to start
         sleep(Duration::from_millis(500)).await;
-        
+
         // Send a simple MCP request (this is a basic test - real MCP testing would need proper protocol)
         if let Some(stdin) = mcp_process.stdin.as_mut() {
             use std::io::Write;
             let _ = stdin.write_all(b"\n");
         }
-        
+
         // Give it time to process
         sleep(Duration::from_millis(100)).await;
-        
+
         // Clean up
         let _ = mcp_process.kill();
         let _ = mcp_process.wait();
-        
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
     }
@@ -485,31 +515,34 @@ auto_restart = true
     fn test_concurrent_cli_operations() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
-        
+
         let mut daemon_process = test_env.start_daemon();
         test_env.wait_for_daemon();
-        
+
         // Activate environment
-        test_env.runcept_cmd()
-            .args(&["activate", test_env.project_dir.to_str().unwrap()])
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
             .assert()
             .success();
-        
+
         // Test concurrent status checks
-        let handles: Vec<_> = (0..5).map(|_| {
-            let home_dir = test_env.home_dir.clone();
-            std::thread::spawn(move || {
-                let runcept_path = get_binary_path("runcept");
-                let mut cmd = Command::new(runcept_path);
-                cmd.env("HOME", &home_dir);
-                cmd.arg("status").assert().success();
+        let handles: Vec<_> = (0..5)
+            .map(|_| {
+                let home_dir = test_env.home_dir.clone();
+                std::thread::spawn(move || {
+                    let runcept_path = get_binary_path("runcept");
+                    let mut cmd = Command::new(runcept_path);
+                    cmd.env("HOME", &home_dir);
+                    cmd.arg("status").assert().success();
+                })
             })
-        }).collect();
-        
+            .collect();
+
         for handle in handles {
             handle.join().unwrap();
         }
-        
+
         test_env.stop_daemon();
         let _ = daemon_process.wait();
     }

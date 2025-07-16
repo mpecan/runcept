@@ -14,13 +14,13 @@ use common::get_binary_path;
 mod mcp_integration_tests {
     use super::*;
     use rmcp::model::{
-        CallToolRequestParam, ErrorData, JsonObject, PaginatedRequestParam, ProtocolVersion,
+        CallToolRequestParam, ProtocolVersion,
     };
     use rmcp::service::{DynService, RunningService};
     use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
     use rmcp::{RoleClient, ServiceExt};
     use std::borrow::Cow;
-    use std::ops::Deref;
+    
 
     struct McpTestEnvironment {
         temp_dir: TempDir,
@@ -52,7 +52,7 @@ mod mcp_integration_tests {
         async fn start_daemon(&self) -> Child {
             let runcept_path = get_binary_path("runcept");
             let mut cmd = Command::new(runcept_path);
-            cmd.args(&["daemon", "start"])
+            cmd.args(["daemon", "start"])
                 .env("HOME", &self.home_dir)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -89,8 +89,7 @@ mod mcp_integration_tests {
         async fn stop_daemon(&self) {
             let runcept_path = get_binary_path("runcept");
             let mut cmd = Command::new(runcept_path);
-            cmd.args(&["daemon", "stop"])
-                .env("HOME", &self.home_dir);
+            cmd.args(["daemon", "stop"]).env("HOME", &self.home_dir);
             let _ = cmd.output().await;
         }
     }
@@ -100,7 +99,7 @@ mod mcp_integration_tests {
             // Best effort cleanup - can't use async in Drop
             let runcept_path = get_binary_path("runcept");
             let _ = std::process::Command::new(runcept_path)
-                .args(&["daemon", "stop"])
+                .args(["daemon", "stop"])
                 .env("HOME", &self.home_dir)
                 .output();
             std::thread::sleep(Duration::from_millis(500));
@@ -117,14 +116,13 @@ mod mcp_integration_tests {
         test_env.wait_for_daemon().await;
 
         // Create MCP client
-        let mut client = test_env.create_mcp_client().await;
+        let client = test_env.create_mcp_client().await;
 
         let result = client.service().get_info();
         assert_eq!(
             result.protocol_version,
             ProtocolVersion::V_2025_03_26,
-            "MCP initialization should succeed: {:?}",
-            result
+            "MCP initialization should succeed: {result:?}"
         );
 
         println!("MCP server initialized successfully");
@@ -145,14 +143,13 @@ mod mcp_integration_tests {
         test_env.wait_for_daemon().await;
 
         // Create MCP client
-        let mut client = test_env.create_mcp_client().await;
+        let client = test_env.create_mcp_client().await;
 
         // List available tools
         let tools_result = client.peer().list_tools(None).await;
         assert!(
             tools_result.is_ok(),
-            "Should be able to list tools: {:?}",
-            tools_result
+            "Should be able to list tools: {tools_result:?}"
         );
 
         let tools = tools_result.unwrap();
@@ -175,13 +172,15 @@ mod mcp_integration_tests {
             "get_daemon_status",
             "kill_all_processes",
             "record_environment_activity",
+            "add_process",
+            "remove_process",
+            "update_process",
         ];
 
         for expected_tool in expected_tools {
             assert!(
                 tools.tools.iter().any(|t| t.name == expected_tool),
-                "Expected tool '{}' should be available",
-                expected_tool
+                "Expected tool '{expected_tool}' should be available"
             );
         }
 
@@ -201,7 +200,7 @@ mod mcp_integration_tests {
         test_env.wait_for_daemon().await;
 
         // Create MCP client
-        let mut client = test_env.create_mcp_client().await;
+        let client = test_env.create_mcp_client().await;
 
         // Test activate_environment with auto-configuration
         // This should create a .runcept.toml file automatically
@@ -218,19 +217,23 @@ mod mcp_integration_tests {
             .await;
         assert!(
             call_result.is_ok(),
-            "activate_environment should succeed: {:?}",
-            call_result
+            "activate_environment should succeed: {call_result:?}"
         );
 
         let response = call_result.unwrap();
-        println!("Activation response: {:?}", response);
+        println!("Activation response: {response:?}");
 
         // Should contain success message
-        assert!(response.content.iter().any(move |c| {
-            c.clone().raw.as_text()
-                .map(|text| text.clone().text.contains("Environment activated"))
-                .unwrap_or(false)
-        }), "Response should contain success message");
+        assert!(
+            response.content.iter().any(move |c| {
+                c.clone()
+                    .raw
+                    .as_text()
+                    .map(|text| text.clone().text.contains("Environment activated"))
+                    .unwrap_or(false)
+            }),
+            "Response should contain success message"
+        );
 
         // Verify that .runcept.toml was created
         let config_path = test_env.project_dir.join(".runcept.toml");
@@ -263,10 +266,7 @@ mod mcp_integration_tests {
         let runcept_path = get_binary_path("runcept");
         let mut init_cmd = Command::new(runcept_path);
         init_cmd
-            .args(&[
-                "init",
-                test_env.project_dir.to_str().unwrap(),
-            ])
+            .args(["init", test_env.project_dir.to_str().unwrap()])
             .env("HOME", &test_env.home_dir);
         let init_output = init_cmd.output().await.expect("Failed to run init command");
         assert!(init_output.status.success(), "Init command should succeed");
@@ -295,25 +295,219 @@ mod mcp_integration_tests {
         ];
 
         for (tool_name, args, action) in test_cases {
-            let result = client.peer().call_tool(CallToolRequestParam {
-                name: Cow::Owned(tool_name.to_string()),
-                arguments: Some(args),
-            }).await;
-            assert!(result.is_ok(), "{} should succeed: {:?}", action, result);
+            let result = client
+                .peer()
+                .call_tool(CallToolRequestParam {
+                    name: Cow::Owned(tool_name.to_string()),
+                    arguments: Some(args),
+                })
+                .await;
+            assert!(result.is_ok(), "{action} should succeed: {result:?}");
 
             let response = result.unwrap();
-            println!("{} response: {:?}", action, response);
+            println!("{action} response: {response:?}");
 
             // Basic success check - no error in response
             assert!(
                 !response.is_error.unwrap_or(false),
-                "{} should not return error",
-                action
+                "{action} should not return error"
             );
 
             // Small delay between requests
             sleep(Duration::from_millis(100)).await;
         }
+
+        // Clean up
+        let _ = client.cancel().await;
+        test_env.stop_daemon().await;
+        let _ = daemon_process.wait().await;
+    }
+
+    /// Test MCP process management tools (add, remove, update)
+    #[tokio::test]
+    async fn test_mcp_process_management_tools() {
+        let test_env = McpTestEnvironment::new();
+
+        // Start daemon first
+        let mut daemon_process = test_env.start_daemon().await;
+        test_env.wait_for_daemon().await;
+
+        // Create a project with configuration first
+        let runcept_path = get_binary_path("runcept");
+        let mut init_cmd = Command::new(runcept_path);
+        init_cmd
+            .args(["init", test_env.project_dir.to_str().unwrap()])
+            .env("HOME", &test_env.home_dir);
+        let init_output = init_cmd.output().await.expect("Failed to run init command");
+        assert!(init_output.status.success(), "Init command should succeed");
+
+        // Create MCP client
+        let client = test_env.create_mcp_client().await;
+
+        // First activate environment
+        let activate_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("activate_environment".to_string()),
+                arguments: Some(rmcp::object!({
+                    "path": test_env.project_dir.to_string_lossy().to_string()
+                })),
+            })
+            .await;
+        assert!(
+            activate_result.is_ok(),
+            "Environment activation should succeed"
+        );
+
+        // Test add_process tool
+        let add_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("add_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "new-process",
+                    "command": "echo 'Hello from new process'",
+                    "auto_restart": false
+                })),
+            })
+            .await;
+        assert!(
+            add_result.is_ok(),
+            "add_process should succeed: {add_result:?}"
+        );
+        let add_response = add_result.unwrap();
+        assert!(
+            !add_response.is_error.unwrap_or(false),
+            "add_process should not return error"
+        );
+
+        // Test update_process tool
+        let update_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("update_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "new-process",
+                    "command": "echo 'Updated process command'",
+                    "auto_restart": true
+                })),
+            })
+            .await;
+        assert!(
+            update_result.is_ok(),
+            "update_process should succeed: {update_result:?}"
+        );
+        let update_response = update_result.unwrap();
+        assert!(
+            !update_response.is_error.unwrap_or(false),
+            "update_process should not return error"
+        );
+
+        // Test remove_process tool
+        let remove_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("remove_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "new-process"
+                })),
+            })
+            .await;
+        assert!(
+            remove_result.is_ok(),
+            "remove_process should succeed: {remove_result:?}"
+        );
+        let remove_response = remove_result.unwrap();
+        assert!(
+            !remove_response.is_error.unwrap_or(false),
+            "remove_process should not return error"
+        );
+
+        // Clean up
+        let _ = client.cancel().await;
+        test_env.stop_daemon().await;
+        let _ = daemon_process.wait().await;
+    }
+
+    /// Test MCP process management tools with environment override
+    #[tokio::test]
+    async fn test_mcp_process_management_with_environment_override() {
+        let test_env = McpTestEnvironment::new();
+
+        // Start daemon first
+        let mut daemon_process = test_env.start_daemon().await;
+        test_env.wait_for_daemon().await;
+
+        // Create a project with configuration first
+        let runcept_path = get_binary_path("runcept");
+        let mut init_cmd = Command::new(runcept_path);
+        init_cmd
+            .args(["init", test_env.project_dir.to_str().unwrap()])
+            .env("HOME", &test_env.home_dir);
+        let init_output = init_cmd.output().await.expect("Failed to run init command");
+        assert!(init_output.status.success(), "Init command should succeed");
+
+        // Create MCP client
+        let client = test_env.create_mcp_client().await;
+
+        // First activate environment
+        let activate_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("activate_environment".to_string()),
+                arguments: Some(rmcp::object!({
+                    "path": test_env.project_dir.to_string_lossy().to_string()
+                })),
+            })
+            .await;
+        assert!(
+            activate_result.is_ok(),
+            "Environment activation should succeed"
+        );
+
+        // Test add_process tool with environment override
+        let add_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("add_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "env-specific-process",
+                    "command": "echo 'Environment specific process'",
+                    "environment": "test_project",
+                    "auto_restart": false
+                })),
+            })
+            .await;
+        assert!(
+            add_result.is_ok(),
+            "add_process with environment should succeed: {add_result:?}"
+        );
+        let add_response = add_result.unwrap();
+        assert!(
+            !add_response.is_error.unwrap_or(false),
+            "add_process should not return error"
+        );
+
+        // Test remove_process tool with environment override
+        let remove_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("remove_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "env-specific-process",
+                    "environment": "test_project"
+                })),
+            })
+            .await;
+        assert!(
+            remove_result.is_ok(),
+            "remove_process with environment should succeed: {remove_result:?}"
+        );
+        let remove_response = remove_result.unwrap();
+        assert!(
+            !remove_response.is_error.unwrap_or(false),
+            "remove_process should not return error"
+        );
 
         // Clean up
         let _ = client.cancel().await;

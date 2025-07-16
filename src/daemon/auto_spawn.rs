@@ -23,7 +23,7 @@ impl DaemonAutoSpawner {
     /// Check if daemon is running and auto-start if not
     pub async fn ensure_daemon_running(&self) -> Result<()> {
         let client = DaemonClient::new(self.socket_path.clone());
-        
+
         if client.is_daemon_running().await {
             debug!("Daemon is already running");
             return Ok(());
@@ -34,14 +34,14 @@ impl DaemonAutoSpawner {
         }
 
         self.auto_start_daemon().await?;
-        
+
         // Wait for daemon to be ready
         self.wait_for_daemon_ready(&client).await?;
-        
+
         if self.verbose {
             info!("Daemon auto-started successfully");
         }
-        
+
         Ok(())
     }
 
@@ -71,11 +71,11 @@ impl DaemonAutoSpawner {
         })?;
 
         debug!("Daemon process spawned with PID: {:?}", child.id());
-        
+
         // We don't wait for the child process - it should run in the background
         // The daemon will detach itself
         std::mem::forget(child);
-        
+
         Ok(())
     }
 
@@ -88,14 +88,14 @@ impl DaemonAutoSpawner {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 return Ok(());
             }
-            
+
             if attempt % 10 == 0 && self.verbose {
                 debug!("Waiting for daemon to start... (attempt {})", attempt + 1);
             }
-            
+
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        
+
         Err(RunceptError::ConnectionError(
             "Timeout waiting for daemon to start".to_string(),
         ))

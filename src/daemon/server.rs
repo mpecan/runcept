@@ -53,7 +53,9 @@ use crate::cli::commands::{
     DaemonRequest, DaemonResponse, DaemonStatusResponse, EnvironmentStatusResponse, LogLine,
     LogsResponse, ProcessInfo,
 };
-use crate::config::{EnvironmentManager, GlobalConfig};
+use crate::config::{
+    Environment, EnvironmentManager, GlobalConfig, ProcessDefinition, ProjectConfig,
+};
 use crate::database::Database;
 use crate::error::{Result, RunceptError};
 use crate::process::ProcessManager;
@@ -94,7 +96,8 @@ impl DaemonServer {
         // Create environment manager with optional database
         let database_pool = config.database.as_ref().map(|db| db.get_pool().clone());
         let environment_manager = Arc::new(RwLock::new(
-            EnvironmentManager::new_with_database(config.global_config.clone(), database_pool).await?,
+            EnvironmentManager::new_with_database(config.global_config.clone(), database_pool)
+                .await?,
         ));
 
         let inactivity_scheduler = Arc::new(RwLock::new(None));
@@ -375,6 +378,19 @@ impl ServerHandles {
             DaemonRequest::RecordEnvironmentActivity { environment_id } => {
                 self.record_environment_activity(environment_id).await
             }
+            // Dynamic process management commands
+            DaemonRequest::AddProcess {
+                process,
+                environment,
+            } => self.add_process(process, environment).await,
+            DaemonRequest::RemoveProcess { name, environment } => {
+                self.remove_process(name, environment).await
+            }
+            DaemonRequest::UpdateProcess {
+                name,
+                process,
+                environment,
+            } => self.update_process(name, process, environment).await,
         }
     }
 
@@ -505,8 +521,7 @@ impl ServerHandles {
             Path::new(&p).to_path_buf()
         } else {
             std::env::current_dir().map_err(|e| {
-                RunceptError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                RunceptError::IoError(std::io::Error::other(
                     format!("Failed to get current directory: {e}"),
                 ))
             })?
@@ -835,6 +850,220 @@ impl ServerHandles {
             Ok(DaemonResponse::Error {
                 error: "Inactivity scheduler not available".to_string(),
             })
+        }
+    }
+
+    /// Resolve environment context - use provided environment or active environment
+    async fn resolve_environment(
+        &self,
+        environment_override: Option<String>,
+    ) -> Result<Option<(String, Environment)>> {
+        let env_manager = self.environment_manager.read().await;
+
+        if let Some(env_name) = environment_override {
+            // Try to find the specified environment
+            let environments = env_manager.get_active_environments();
+            if let Some((id, env)) = environments.iter().find(|(id, _)| *id == &env_name) {
+                Ok(Some((id.to_string(), (*env).clone())))
+            } else {
+                // Environment not found or not active
+                Ok(None)
+            }
+        } else {
+            // Use the first active environment (context-aware)
+            // TODO: This might need to be enhanced based on context (e.g., current working directory)
+            let environments = env_manager.get_active_environments();
+            if let Some((id, env)) = environments.first() {
+                Ok(Some((id.to_string(), (*env).clone())))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    /// Add a new process to the project configuration
+    async fn add_process(
+        &self,
+        process: ProcessDefinition,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        let (_env_id, resolved_env) = match self.resolve_environment(environment.clone()).await? {
+            Some((id, env)) => (id, env),
+            None => {
+                let env_msg = environment
+                    .map(|e| format!("Environment '{e}' not found or not active"))
+                    .unwrap_or_else(|| "No active environment".to_string());
+                return Ok(DaemonResponse::Error { error: env_msg });
+            }
+        };
+
+        // Get the project config path
+        let project_path = resolved_env.project_path.clone();
+        let config_path = project_path.join(".runcept.toml");
+
+        // Load current config
+        let mut project_config = match ProjectConfig::load_from_path(&config_path).await {
+            Ok(config) => config,
+            Err(e) => {
+                return Ok(DaemonResponse::Error {
+                    error: format!("Failed to load project config: {e}"),
+                });
+            }
+        };
+
+        // Check if process already exists
+        if project_config.processes.contains_key(&process.name) {
+            return Ok(DaemonResponse::Error {
+                error: format!(
+                    "Process '{}' already exists in environment '{}'",
+                    process.name, resolved_env.name
+                ),
+            });
+        }
+
+        // Add the new process
+        project_config
+            .processes
+            .insert(process.name.clone(), process.clone());
+
+        // Save the updated config
+        match project_config.save_to_path(&config_path).await {
+            Ok(_) => Ok(DaemonResponse::Success {
+                message: format!(
+                    "Process '{}' added successfully to environment '{}'",
+                    process.name, resolved_env.name
+                ),
+            }),
+            Err(e) => Ok(DaemonResponse::Error {
+                error: format!("Failed to save project config: {e}"),
+            }),
+        }
+    }
+
+    /// Remove a process from the project configuration
+    async fn remove_process(
+        &self,
+        name: String,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        let (_env_id, resolved_env) = match self.resolve_environment(environment.clone()).await? {
+            Some((id, env)) => (id, env),
+            None => {
+                let env_msg = environment
+                    .map(|e| format!("Environment '{e}' not found or not active"))
+                    .unwrap_or_else(|| "No active environment".to_string());
+                return Ok(DaemonResponse::Error { error: env_msg });
+            }
+        };
+
+        // Get the project config path
+        let project_path = resolved_env.project_path.clone();
+        let config_path = project_path.join(".runcept.toml");
+
+        // Load current config
+        let mut project_config = match ProjectConfig::load_from_path(&config_path).await {
+            Ok(config) => config,
+            Err(e) => {
+                return Ok(DaemonResponse::Error {
+                    error: format!("Failed to load project config: {e}"),
+                });
+            }
+        };
+
+        // Check if process exists
+        if !project_config.processes.contains_key(&name) {
+            return Ok(DaemonResponse::Error {
+                error: format!(
+                    "Process '{}' not found in environment '{}'",
+                    name, resolved_env.name
+                ),
+            });
+        }
+
+        // Stop the process if it's running
+        let mut process_manager = self.process_manager.write().await;
+        let _ = process_manager.stop_process(&name).await;
+
+        // Remove the process
+        project_config.processes.remove(&name);
+
+        // Save the updated config
+        match project_config.save_to_path(&config_path).await {
+            Ok(_) => Ok(DaemonResponse::Success {
+                message: format!(
+                    "Process '{}' removed successfully from environment '{}'",
+                    name, resolved_env.name
+                ),
+            }),
+            Err(e) => Ok(DaemonResponse::Error {
+                error: format!("Failed to save project config: {e}"),
+            }),
+        }
+    }
+
+    /// Update an existing process configuration
+    async fn update_process(
+        &self,
+        name: String,
+        process: ProcessDefinition,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        let (_env_id, resolved_env) = match self.resolve_environment(environment.clone()).await? {
+            Some((id, env)) => (id, env),
+            None => {
+                let env_msg = environment
+                    .map(|e| format!("Environment '{e}' not found or not active"))
+                    .unwrap_or_else(|| "No active environment".to_string());
+                return Ok(DaemonResponse::Error { error: env_msg });
+            }
+        };
+
+        // Get the project config path
+        let project_path = resolved_env.project_path.clone();
+        let config_path = project_path.join(".runcept.toml");
+
+        // Load current config
+        let mut project_config = match ProjectConfig::load_from_path(&config_path).await {
+            Ok(config) => config,
+            Err(e) => {
+                return Ok(DaemonResponse::Error {
+                    error: format!("Failed to load project config: {e}"),
+                });
+            }
+        };
+
+        // Check if process exists
+        if !project_config.processes.contains_key(&name) {
+            return Ok(DaemonResponse::Error {
+                error: format!(
+                    "Process '{}' not found in environment '{}'",
+                    name, resolved_env.name
+                ),
+            });
+        }
+
+        // Stop the process if it's running (will be restarted if needed)
+        let mut process_manager = self.process_manager.write().await;
+        let _ = process_manager.stop_process(&name).await;
+
+        // Update the process (ensure the name matches)
+        let mut updated_process = process;
+        updated_process.name = name.clone();
+        project_config
+            .processes
+            .insert(name.clone(), updated_process);
+
+        // Save the updated config
+        match project_config.save_to_path(&config_path).await {
+            Ok(_) => Ok(DaemonResponse::Success {
+                message: format!(
+                    "Process '{}' updated successfully in environment '{}'",
+                    name, resolved_env.name
+                ),
+            }),
+            Err(e) => Ok(DaemonResponse::Error {
+                error: format!("Failed to save project config: {e}"),
+            }),
         }
     }
 }
