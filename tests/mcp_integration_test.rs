@@ -13,14 +13,11 @@ use common::get_binary_path;
 #[cfg(test)]
 mod mcp_integration_tests {
     use super::*;
-    use rmcp::model::{
-        CallToolRequestParam, ProtocolVersion,
-    };
+    use rmcp::model::{CallToolRequestParam, ProtocolVersion};
     use rmcp::service::{DynService, RunningService};
     use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
     use rmcp::{RoleClient, ServiceExt};
     use std::borrow::Cow;
-    
 
     struct McpTestEnvironment {
         temp_dir: TempDir,

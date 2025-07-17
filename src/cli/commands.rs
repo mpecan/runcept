@@ -33,15 +33,9 @@ mod tests {
     #[test]
     fn test_logs_command_parsing() {
         // Test logs with follow
-        let args = CliArgs::try_parse_from([
-            "runcept",
-            "logs",
-            "web-server",
-            "--follow",
-            "--lines",
-            "50",
-        ])
-        .unwrap();
+        let args =
+            CliArgs::try_parse_from(["runcept", "logs", "web-server", "--follow", "--lines", "50"])
+                .unwrap();
         match args.command {
             Commands::Logs {
                 name,

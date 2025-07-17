@@ -150,73 +150,73 @@ pub struct RunceptTools {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct LogsParam {
-    /// Name of the process to get logs for
+    /// Name of the process to get logs for. Must be a process defined in the current environment.
     pub name: String,
-    /// Number of lines to retrieve from the logs
+    /// Number of recent log lines to retrieve. If not specified, returns all available logs. Maximum recommended: 1000 lines.
     pub lines: Option<usize>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct EnvironmentPathParam {
-    /// Path to the .runcept.toml file or directory containing it
+    /// Path to the .runcept.toml file or directory containing it. Can be absolute or relative. If not provided, uses current working directory. Example: "/path/to/project" or "./my-project"
     pub path: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct NameParam {
-    /// Name of the process to manage
+    /// Name of the process to manage. Must match a process defined in the current environment configuration.
     pub name: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct AddProcessParam {
-    /// Name of the process to add
+    /// Unique name identifier for the process. Must not conflict with existing processes in the environment.
     pub name: String,
-    /// Command to execute
+    /// Shell command to execute. Can include arguments. Example: "npm start", "python app.py --port 8000"
     pub command: String,
-    /// Working directory (optional)
+    /// Working directory for the process. Relative to project root if not absolute. Default: project root directory.
     pub working_dir: Option<String>,
-    /// Whether to auto-restart the process
+    /// Whether to automatically restart the process if it exits. Default: false
     pub auto_restart: Option<bool>,
-    /// Health check URL (optional)
+    /// HTTP URL for health checks. Process is considered healthy if this URL returns 2xx status. Example: "http://localhost:8000/health"
     pub health_check_url: Option<String>,
-    /// Health check interval in seconds (optional)
+    /// Interval in seconds between health checks. Only used if health_check_url is provided. Default: 30 seconds
     pub health_check_interval: Option<u32>,
-    /// Environment variables (optional)
+    /// Environment variables to set for the process. Key-value pairs that will be available in the process environment.
     pub env_vars: Option<std::collections::HashMap<String, String>>,
-    /// Processes this one depends on (optional)
+    /// List of process names this process depends on. This process will not start until all dependencies are running.
     pub depends_on: Option<Vec<String>>,
-    /// Override environment (optional)
+    /// Override target environment. If not provided, uses the currently active environment.
     pub environment: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RemoveProcessParam {
-    /// Name of the process to remove
+    /// Name of the process to remove from the configuration. The process will be stopped if currently running.
     pub name: String,
-    /// Override environment (optional)
+    /// Override target environment. If not provided, uses the currently active environment.
     pub environment: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateProcessParam {
-    /// Name of the process to update
+    /// Name of the existing process to update. Must match a process already defined in the environment.
     pub name: String,
-    /// Command to execute
+    /// New shell command to execute. Can include arguments. Example: "npm run dev", "python app.py --debug"
     pub command: String,
-    /// Working directory (optional)
+    /// New working directory for the process. Relative to project root if not absolute.
     pub working_dir: Option<String>,
-    /// Whether to auto-restart the process
+    /// Whether to automatically restart the process if it exits.
     pub auto_restart: Option<bool>,
-    /// Health check URL (optional)
+    /// New HTTP URL for health checks. Process is considered healthy if this URL returns 2xx status.
     pub health_check_url: Option<String>,
-    /// Health check interval in seconds (optional)
+    /// New interval in seconds between health checks. Only used if health_check_url is provided.
     pub health_check_interval: Option<u32>,
-    /// Environment variables (optional)
+    /// New environment variables to set for the process. Replaces existing environment variables.
     pub env_vars: Option<std::collections::HashMap<String, String>>,
-    /// Processes this one depends on (optional)
+    /// New list of process names this process depends on. Replaces existing dependencies.
     pub depends_on: Option<Vec<String>>,
-    /// Override environment (optional)
+    /// Override target environment. If not provided, uses the currently active environment.
     pub environment: Option<String>,
 }
 
@@ -249,7 +249,9 @@ impl RunceptTools {
     }
 
     /// Activate a project environment from .runcept.toml configuration
-    #[tool(description = "Activate a project environment from .runcept.toml configuration")]
+    #[tool(
+        description = "Activate a project environment from .runcept.toml configuration. Auto-creates default config if none exists. Sets environment as active context for all process operations."
+    )]
     async fn activate_environment(
         &self,
         Parameters(EnvironmentPathParam { path }): Parameters<EnvironmentPathParam>,
@@ -316,7 +318,9 @@ impl RunceptTools {
     }
 
     /// Deactivate the current environment
-    #[tool(description = "Deactivate the current environment")]
+    #[tool(
+        description = "Deactivate the current environment. Stops all processes and clears active environment context. Process operations will require explicit environment after this."
+    )]
     async fn deactivate_environment(&self) -> Result<CallToolResult, McpError> {
         let request = DaemonRequest::DeactivateEnvironment;
         let response = send_daemon_request(request).await?;
@@ -331,7 +335,9 @@ impl RunceptTools {
     }
 
     /// Get the status of the current environment
-    #[tool(description = "Get the status of the current environment")]
+    #[tool(
+        description = "Get comprehensive status of the current environment including process states, PIDs, uptime, and environment details. Shows all processes defined in the environment."
+    )]
     async fn get_environment_status(&self) -> Result<CallToolResult, McpError> {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
@@ -344,7 +350,9 @@ impl RunceptTools {
     }
 
     /// Start a specific process in the current environment
-    #[tool(description = "Start a specific process in the current environment")]
+    #[tool(
+        description = "Start a named process from the current environment configuration. Process must be defined in .runcept.toml. Launches with configured command, working directory, and environment variables."
+    )]
     async fn start_process(
         &self,
         Parameters(NameParam { name }): Parameters<NameParam>,
@@ -360,7 +368,9 @@ impl RunceptTools {
     }
 
     /// Stop a running process
-    #[tool(description = "Stop a running process")]
+    #[tool(
+        description = "Gracefully stop a running process by name. Sends SIGTERM first, then SIGKILL if needed. Process won't auto-restart even if configured to do so."
+    )]
     async fn stop_process(
         &self,
         Parameters(NameParam { name }): Parameters<NameParam>,
@@ -376,7 +386,9 @@ impl RunceptTools {
     }
 
     /// Restart a process
-    #[tool(description = "Restart a process")]
+    #[tool(
+        description = "Stop and restart a process by name. Useful for applying configuration changes or recovering from errors. If process is not running, simply starts it."
+    )]
     async fn restart_process(
         &self,
         Parameters(NameParam { name }): Parameters<NameParam>,
@@ -392,7 +404,9 @@ impl RunceptTools {
     }
 
     /// List processes in the current environment
-    #[tool(description = "List processes in the current environment")]
+    #[tool(
+        description = "List all processes in the current environment with their status (Running/Stopped/Failed), PID if running, uptime, and environment name."
+    )]
     async fn list_processes(&self) -> Result<CallToolResult, McpError> {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
@@ -405,7 +419,9 @@ impl RunceptTools {
     }
 
     /// Get logs for a specific process
-    #[tool(description = "Get logs for a specific process")]
+    #[tool(
+        description = "Retrieve log output from a specific process including stdout/stderr with timestamps and log levels. Specify number of lines or get all logs."
+    )]
     async fn get_process_logs(
         &self,
         Parameters(LogsParam { name, lines }): Parameters<LogsParam>,
@@ -421,7 +437,9 @@ impl RunceptTools {
     }
 
     /// List all processes across all environments
-    #[tool(description = "List all processes across all environments")]
+    #[tool(
+        description = "Get system-wide view of all processes across every environment with status, runtime info, and environment names. Useful for monitoring and debugging."
+    )]
     async fn list_all_processes(&self) -> Result<CallToolResult, McpError> {
         let request = DaemonRequest::ListAllProcesses;
         let response = send_daemon_request(request).await?;
@@ -431,7 +449,9 @@ impl RunceptTools {
     }
 
     /// Emergency stop all processes
-    #[tool(description = "Emergency stop all processes")]
+    #[tool(
+        description = "EMERGENCY: Immediately stop all processes across all environments. Use with caution - this will disrupt all running services and applications!"
+    )]
     async fn kill_all_processes(&self) -> Result<CallToolResult, McpError> {
         let request = DaemonRequest::KillAllProcesses;
         let response = send_daemon_request(request).await?;
@@ -441,7 +461,9 @@ impl RunceptTools {
     }
 
     /// Get daemon status and information
-    #[tool(description = "Get daemon status and information")]
+    #[tool(
+        description = "Get detailed daemon status including running state, uptime, version, total processes managed, and active environment count."
+    )]
     async fn get_daemon_status(&self) -> Result<CallToolResult, McpError> {
         let request = DaemonRequest::GetDaemonStatus;
         let response = send_daemon_request(request).await?;
@@ -451,7 +473,9 @@ impl RunceptTools {
     }
 
     /// Record activity for the current environment (for inactivity tracking)
-    #[tool(description = "Record activity for the current environment to prevent auto-shutdown")]
+    #[tool(
+        description = "Record activity for the current environment to reset inactivity timer and prevent auto-shutdown. Useful for keeping development environments active during extended work sessions."
+    )]
     async fn record_environment_activity(&self) -> Result<CallToolResult, McpError> {
         let _ = self.record_current_environment_activity().await;
 
@@ -468,7 +492,9 @@ impl RunceptTools {
     }
 
     /// Add a new process to the project configuration
-    #[tool(description = "Add a new process to the project configuration")]
+    #[tool(
+        description = "Dynamically add a new process to the project's .runcept.toml configuration. Process becomes immediately available for management operations. Supports full configuration options."
+    )]
     async fn add_process(
         &self,
         Parameters(AddProcessParam {
@@ -509,7 +535,9 @@ impl RunceptTools {
     }
 
     /// Remove a process from the project configuration
-    #[tool(description = "Remove a process from the project configuration")]
+    #[tool(
+        description = "Remove a process from the project configuration and .runcept.toml file. Stops the process first if running. WARNING: This permanently removes the process definition."
+    )]
     async fn remove_process(
         &self,
         Parameters(RemoveProcessParam { name, environment }): Parameters<RemoveProcessParam>,
@@ -525,7 +553,9 @@ impl RunceptTools {
     }
 
     /// Update an existing process in the project configuration
-    #[tool(description = "Update an existing process in the project configuration")]
+    #[tool(
+        description = "Update an existing process configuration in .runcept.toml. Only specified parameters are changed, others remain unchanged. Restart process to apply changes."
+    )]
     async fn update_process(
         &self,
         Parameters(UpdateProcessParam {
@@ -579,7 +609,30 @@ impl ServerHandler for RunceptTools {
                 name: "runcept-mcp".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
-            instructions: Some("This server provides tools for managing Runcept processes and environments. Use the available tools to start, stop, restart processes, manage environments, and get status information.".to_string()),
+            instructions: Some("Runcept MCP Server - Advanced Process Management
+
+This server provides comprehensive tools for managing long-running processes and development environments using Runcept. 
+
+WORKFLOW:
+1. First, activate an environment using 'activate_environment' (auto-creates config if needed)
+2. Use process management tools: start_process, stop_process, restart_process, list_processes
+3. Monitor with get_environment_status, get_process_logs, get_daemon_status
+4. Dynamically modify configuration with add_process, remove_process, update_process
+
+KEY FEATURES:
+- Environment-based process management with .runcept.toml configuration
+- Auto-restart, health checks, and dependency management
+- Comprehensive logging and monitoring
+- Inactivity timeout with auto-shutdown prevention
+- Emergency controls for system-wide management
+
+COMMON PATTERNS:
+- Development setup: activate_environment → start_process for each service
+- Monitoring: get_environment_status → get_process_logs for debugging
+- Configuration: add_process → restart_process to apply changes
+- Emergency: kill_all_processes when needed
+
+Each tool provides detailed parameter documentation and usage examples.".to_string()),
         }
     }
 

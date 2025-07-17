@@ -521,9 +521,9 @@ impl ServerHandles {
             Path::new(&p).to_path_buf()
         } else {
             std::env::current_dir().map_err(|e| {
-                RunceptError::IoError(std::io::Error::other(
-                    format!("Failed to get current directory: {e}"),
-                ))
+                RunceptError::IoError(std::io::Error::other(format!(
+                    "Failed to get current directory: {e}"
+                )))
             })?
         };
 
