@@ -432,9 +432,11 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
+        // Use the current session environment
+        let current_env = self.current_environment.read().await.clone();
         let request = DaemonRequest::StartProcess {
             name,
-            environment: None,
+            environment: current_env,
         };
         let response = send_daemon_request(request).await?;
 
@@ -453,9 +455,11 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
+        // Use the current session environment
+        let current_env = self.current_environment.read().await.clone();
         let request = DaemonRequest::StopProcess {
             name,
-            environment: None,
+            environment: current_env,
         };
         let response = send_daemon_request(request).await?;
 
@@ -474,9 +478,11 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
+        // Use the current session environment
+        let current_env = self.current_environment.read().await.clone();
         let request = DaemonRequest::RestartProcess {
             name,
-            environment: None,
+            environment: current_env,
         };
         let response = send_daemon_request(request).await?;
 
@@ -492,7 +498,11 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
-        let request = DaemonRequest::ListProcesses { environment: None };
+        // Use the current session environment
+        let current_env = self.current_environment.read().await.clone();
+        let request = DaemonRequest::ListProcesses {
+            environment: current_env,
+        };
         let response = send_daemon_request(request).await?;
 
         let result_text = format_daemon_response(response);
@@ -510,10 +520,12 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
+        // Use the current session environment
+        let current_env = self.current_environment.read().await.clone();
         let request = DaemonRequest::GetProcessLogs {
             name,
             lines,
-            environment: None,
+            environment: current_env,
         };
         let response = send_daemon_request(request).await?;
 

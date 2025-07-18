@@ -282,7 +282,7 @@ impl ProcessHandles {
             .await
     }
 
-    /// Environment resolution logic - use provided environment or current active environment
+    /// Environment resolution logic - validate and resolve environment with comprehensive error handling
     async fn resolve_environment_id(&self, environment_override: Option<String>) -> Result<String> {
         match environment_override {
             Some(env_id) => {
@@ -292,17 +292,45 @@ impl ProcessHandles {
                     let env_manager_guard = env_manager.read().await;
                     let env = env_manager_guard.get_environment(&env_id).ok_or_else(|| {
                         RunceptError::EnvironmentError(format!(
-                            "Environment '{}' not found",
+                            "Environment '{}' not found or not activated.\n\n\
+                            Available environments: {}\n\n\
+                            To fix this:\n\
+                            1. Run 'runcept activate {}' to activate the environment\n\
+                            2. Ensure the path contains a valid .runcept.toml file\n\
+                            3. Check that the environment path is correct",
+                            env_id,
+                            env_manager_guard
+                                .get_active_environments()
+                                .into_iter()
+                                .map(|(name, _)| name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "),
                             env_id
                         ))
                     })?;
 
                     if !env.is_active() {
                         return Err(RunceptError::EnvironmentError(format!(
-                            "Environment '{}' is not active",
-                            env_id
+                            "Environment '{}' is registered but not active.\n\n\
+                            To fix this:\n\
+                            1. Run 'runcept activate {}' to activate the environment\n\
+                            2. Ensure the environment configuration is valid",
+                            env_id, env_id
                         )));
                     }
+
+                    // Additional validation: ensure the environment has a valid project configuration
+                    if env.project_config.processes.is_empty() {
+                        log_debug(
+                            "daemon",
+                            &format!("Environment '{}' has no processes defined", env_id),
+                            None,
+                        );
+                    }
+                } else {
+                    return Err(RunceptError::EnvironmentError(
+                        "Environment manager not initialized".to_string(),
+                    ));
                 }
                 Ok(env_id)
             }
@@ -310,7 +338,15 @@ impl ProcessHandles {
                 // Fall back to current active environment
                 let current_env_id = self.current_environment_id.read().await.clone();
                 current_env_id.ok_or_else(|| {
-                    RunceptError::EnvironmentError("No active environment".to_string())
+                    RunceptError::EnvironmentError(
+                        "No active environment available.\n\n\
+                        This should not happen when using CLI environment resolution.\n\
+                        To fix this:\n\
+                        1. Run 'runcept activate' in a directory with .runcept.toml\n\
+                        2. Use --environment flag to specify a project directory\n\
+                        3. Check that the daemon is properly initialized"
+                            .to_string(),
+                    )
                 })
             }
         }

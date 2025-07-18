@@ -75,6 +75,24 @@ auto_restart = true
             cmd
         }
 
+        fn runcept_cmd_in_project(&self) -> Command {
+            let runcept_path = get_binary_path("runcept");
+            let mut cmd = Command::new(runcept_path);
+            cmd.env("HOME", &self.home_dir);
+            cmd.current_dir(&self.project_dir);
+            cmd
+        }
+
+        fn runcept_cmd_with_env(&self, subcommand: &str, args: &[&str]) -> Command {
+            let runcept_path = get_binary_path("runcept");
+            let mut cmd = Command::new(runcept_path);
+            cmd.env("HOME", &self.home_dir);
+            cmd.arg(subcommand);
+            cmd.args(args);
+            cmd.args(["--environment", self.project_dir.to_str().unwrap()]);
+            cmd
+        }
+
         fn start_daemon(&self) -> std::process::Child {
             let runcept_path = get_binary_path("runcept");
             let mut cmd = std::process::Command::new(runcept_path);
@@ -205,9 +223,9 @@ auto_restart = true
             .assert()
             .success();
 
-        // Start a process
+        // Start a process - use project directory as current working directory
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .args(["start", "worker"])
             .assert()
             .success()
@@ -216,9 +234,9 @@ auto_restart = true
         // Wait a moment for process to run
         std::thread::sleep(Duration::from_millis(500));
 
-        // List processes
+        // List processes - use project directory as current working directory
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .arg("list")
             .assert()
             .success()
@@ -228,7 +246,7 @@ auto_restart = true
         std::thread::sleep(Duration::from_secs(4));
 
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .args(["logs", "worker"])
             .assert()
             .success()
@@ -296,13 +314,13 @@ auto_restart = true
 
         // Start multiple processes
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .args(["start", "worker"])
             .assert()
             .success();
 
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .args(["start", "background"])
             .assert()
             .success();
@@ -311,7 +329,7 @@ auto_restart = true
 
         // List all processes
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .arg("list")
             .assert()
             .success()
@@ -320,7 +338,7 @@ auto_restart = true
 
         // Stop specific process
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .args(["stop", "background"])
             .assert()
             .success();
@@ -328,7 +346,68 @@ auto_restart = true
         std::thread::sleep(Duration::from_millis(100));
 
         // Verify process is stopped
-        test_env.runcept_cmd().arg("list").assert().success();
+        test_env
+            .runcept_cmd_in_project()
+            .arg("list")
+            .assert()
+            .success();
+
+        test_env.stop_daemon();
+        let _ = daemon_process.wait();
+    }
+
+    #[test]
+    fn test_environment_enforcement() {
+        let test_env = TestEnvironment::new();
+        // Note: NOT calling setup_test_project(), so no .runcept.toml exists
+
+        let mut daemon_process = test_env.start_daemon();
+        test_env.wait_for_daemon();
+
+        // Test that process commands fail when no environment is available
+        test_env
+            .runcept_cmd()
+            .args(["start", "worker"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "No .runcept.toml configuration found",
+            ))
+            .stderr(predicate::str::contains("To fix this"));
+
+        // Test that list command fails when no environment is available
+        test_env
+            .runcept_cmd()
+            .arg("list")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "No .runcept.toml configuration found",
+            ));
+
+        // Test that commands work when using --environment flag with valid path
+        test_env.setup_test_project();
+
+        // Activate the environment first
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Test that --environment flag works
+        test_env
+            .runcept_cmd_with_env("start", &["worker"])
+            .assert()
+            .success();
+
+        // Test that invalid environment path fails with helpful error
+        test_env
+            .runcept_cmd()
+            .args(["start", "worker", "--environment", "/nonexistent/path"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Invalid environment path"));
 
         test_env.stop_daemon();
         let _ = daemon_process.wait();
@@ -441,7 +520,7 @@ auto_restart = true
             .success();
 
         test_env
-            .runcept_cmd()
+            .runcept_cmd_in_project()
             .args(["start", "worker"])
             .assert()
             .success();
