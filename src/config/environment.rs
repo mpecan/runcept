@@ -321,7 +321,6 @@ use sqlx::{Pool, Sqlite};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EnvironmentStatus {
@@ -369,8 +368,11 @@ impl Environment {
         let now = Utc::now();
         let merged_config = project_config.merge_with_global(&global_config);
 
+        // Use the absolute path as the environment ID for uniqueness across different paths
+        let id = project_path.to_string_lossy().to_string();
+
         Self {
-            id: Uuid::new_v4().to_string(),
+            id,
             name,
             project_path,
             status: EnvironmentStatus::Inactive,
@@ -733,6 +735,37 @@ impl EnvironmentManager {
             environment.merged_config =
                 environment.project_config.merge_with_global(&global_config);
         }
+    }
+
+    /// Reload the project configuration for a specific environment from disk
+    pub async fn reload_environment_config(&mut self, env_id: &str) -> Result<()> {
+        use crate::config::project::find_project_config;
+
+        if let Some(environment) = self.environments.get_mut(env_id) {
+            // Find the project config file
+            let config_path = find_project_config(&environment.project_path)
+                .await?
+                .ok_or_else(|| {
+                    RunceptError::ConfigError(format!(
+                        "No .runcept.toml found in or above {}",
+                        environment.project_path.display()
+                    ))
+                })?;
+
+            // Reload the project config from disk
+            let project_config = ProjectConfig::load_from_path(&config_path).await?;
+
+            // Update the environment with the new config
+            environment.project_config = project_config.clone();
+            environment.merged_config = project_config.merge_with_global(&self.global_config);
+        }
+
+        // Save the updated environment to database after releasing the mutable borrow
+        if let Some(environment) = self.environments.get(env_id) {
+            self.save_environment_to_database(environment).await?;
+        }
+
+        Ok(())
     }
 
     /// Load environments from database

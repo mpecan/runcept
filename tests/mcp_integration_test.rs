@@ -91,6 +91,248 @@ mod mcp_integration_tests {
         }
     }
 
+    /// Test MCP working directory resolution for processes
+    #[tokio::test]
+    async fn test_mcp_working_directory_resolution() {
+        let test_env = McpTestEnvironment::new();
+
+        // Start daemon first
+        let mut daemon_process = test_env.start_daemon().await;
+        test_env.wait_for_daemon().await;
+
+        // Create a test file in the project directory to verify working directory
+        let test_file_path = test_env.project_dir.join("test_marker.txt");
+        std::fs::write(&test_file_path, "working_directory_test").unwrap();
+
+        // Create a project with configuration first
+        let runcept_path = get_binary_path("runcept");
+        let mut init_cmd = Command::new(runcept_path);
+        init_cmd
+            .args(["init", test_env.project_dir.to_str().unwrap()])
+            .env("HOME", &test_env.home_dir);
+        let init_output = init_cmd.output().await.expect("Failed to run init command");
+        assert!(init_output.status.success(), "Init command should succeed");
+
+        // Create MCP client
+        let client = test_env.create_mcp_client().await;
+
+        // First activate environment
+        let activate_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("activate_environment".to_string()),
+                arguments: Some(rmcp::object!({
+                    "path": test_env.project_dir.to_string_lossy().to_string()
+                })),
+            })
+            .await;
+        assert!(
+            activate_result.is_ok(),
+            "Environment activation should succeed"
+        );
+
+        // Test 1: Add process with working_dir = "." (should resolve to project directory)
+        let add_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("add_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-working-dir",
+                    "command": "ls test_marker.txt && sleep 1",
+                    "working_dir": ".",
+                    "auto_restart": false
+                })),
+            })
+            .await;
+        assert!(
+            add_result.is_ok(),
+            "add_process with working_dir='.' should succeed: {add_result:?}"
+        );
+        let add_response = add_result.unwrap();
+
+        // Print the add_process response for debugging
+        let add_response_content = add_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        println!("Add process response: {}", add_response_content);
+
+        assert!(
+            !add_response.is_error.unwrap_or(false),
+            "add_process should not return error. Response: {add_response_content}"
+        );
+
+        // Test 2: Start the process to verify it runs in correct directory
+        let start_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("start_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-working-dir"
+                })),
+            })
+            .await;
+        assert!(
+            start_result.is_ok(),
+            "start_process should succeed: {start_result:?}"
+        );
+
+        // Give process time to complete
+        sleep(Duration::from_millis(1500)).await;
+
+        // First, let's verify the process was actually added to the environment by listing processes
+        let list_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("list_processes".to_string()),
+                arguments: Some(rmcp::object!({})),
+            })
+            .await;
+        assert!(
+            list_result.is_ok(),
+            "list_processes should succeed: {list_result:?}"
+        );
+        let list_response = list_result.unwrap();
+        let process_list = list_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        println!("Process list: {}", process_list);
+        assert!(
+            process_list.contains("test-working-dir"),
+            "Process list should contain test-working-dir. List: {process_list}"
+        );
+
+        // Test 3: Check logs to verify the process found the test file (indicating correct working directory)
+        let logs_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("get_process_logs".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-working-dir"
+                })),
+            })
+            .await;
+        assert!(
+            logs_result.is_ok(),
+            "get_process_logs should succeed: {logs_result:?}"
+        );
+        let logs_response = logs_result.unwrap();
+
+        // Extract log content and verify the process found the test file
+        let log_content = logs_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            log_content.contains("test_marker.txt"),
+            "Process logs should contain test_marker.txt, indicating correct working directory. Logs: {log_content}"
+        );
+
+        // Test 4: Test relative path resolution
+        // Create a subdirectory
+        let sub_dir = test_env.project_dir.join("subdir");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(sub_dir.join("sub_marker.txt"), "subdirectory_test").unwrap();
+
+        let add_subdir_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("add_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-subdir",
+                    "command": "ls sub_marker.txt && sleep 1",
+                    "working_dir": "subdir",
+                    "auto_restart": false
+                })),
+            })
+            .await;
+        assert!(
+            add_subdir_result.is_ok(),
+            "add_process with relative working_dir should succeed: {add_subdir_result:?}"
+        );
+
+        let start_subdir_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("start_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-subdir"
+                })),
+            })
+            .await;
+        assert!(
+            start_subdir_result.is_ok(),
+            "start_process for subdir test should succeed: {start_subdir_result:?}"
+        );
+
+        // Give process time to complete
+        sleep(Duration::from_millis(1500)).await;
+
+        let logs_subdir_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("get_process_logs".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-subdir"
+                })),
+            })
+            .await;
+        assert!(
+            logs_subdir_result.is_ok(),
+            "get_process_logs for subdir should succeed: {logs_subdir_result:?}"
+        );
+        let logs_subdir_response = logs_subdir_result.unwrap();
+
+        let log_subdir_content = logs_subdir_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            log_subdir_content.contains("sub_marker.txt"),
+            "Subdir process logs should contain sub_marker.txt, indicating correct relative path resolution. Logs: {log_subdir_content}"
+        );
+
+        // Clean up
+        let _ = client.cancel().await;
+        test_env.stop_daemon().await;
+        let _ = daemon_process.wait().await;
+    }
     impl Drop for McpTestEnvironment {
         fn drop(&mut self) {
             // Best effort cleanup - can't use async in Drop
@@ -418,6 +660,117 @@ mod mcp_integration_tests {
         assert!(
             !remove_response.is_error.unwrap_or(false),
             "remove_process should not return error"
+        );
+
+        // Clean up
+        let _ = client.cancel().await;
+        test_env.stop_daemon().await;
+        let _ = daemon_process.wait().await;
+    }
+
+    /// Test automatic config reloading when .runcept.toml is modified
+    #[tokio::test]
+    async fn test_automatic_config_reload() {
+        let test_env = McpTestEnvironment::new();
+
+        // Start daemon first
+        let mut daemon_process = test_env.start_daemon().await;
+        test_env.wait_for_daemon().await;
+
+        // Create a project with configuration first
+        let runcept_path = get_binary_path("runcept");
+        let mut init_cmd = Command::new(runcept_path);
+        init_cmd
+            .args(["init", test_env.project_dir.to_str().unwrap()])
+            .env("HOME", &test_env.home_dir);
+        let init_output = init_cmd.output().await.expect("Failed to run init command");
+        assert!(init_output.status.success(), "Init command should succeed");
+
+        // Create MCP client
+        let client = test_env.create_mcp_client().await;
+
+        // Activate environment
+        let activate_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("activate_environment".to_string()),
+                arguments: Some(rmcp::object!({
+                    "path": test_env.project_dir.to_string_lossy().to_string()
+                })),
+            })
+            .await;
+        assert!(
+            activate_result.is_ok(),
+            "Environment activation should succeed"
+        );
+
+        // Verify initial config has only the worker process
+        let initial_list_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("list_processes".to_string()),
+                arguments: Some(rmcp::object!({})),
+            })
+            .await;
+        assert!(initial_list_result.is_ok());
+        let initial_list_response = initial_list_result.unwrap();
+        let initial_process_list = initial_list_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        assert!(initial_process_list.contains("worker"));
+        assert!(!initial_process_list.contains("auto-added-process"));
+
+        // Modify the .runcept.toml file directly to add a new process
+        let config_path = test_env.project_dir.join(".runcept.toml");
+        let mut config_content = std::fs::read_to_string(&config_path).unwrap();
+        
+        // Add a new process to the config
+        config_content.push_str("\n[processes.auto-added-process]\n");
+        config_content.push_str("command = \"echo 'Auto-added process'\"\n");
+        config_content.push_str("auto_restart = false\n");
+        
+        std::fs::write(&config_path, config_content).unwrap();
+
+        // Give the file watcher time to detect the change and reload
+        sleep(Duration::from_millis(1000)).await;
+
+        // Verify the new process appears in the list
+        let updated_list_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("list_processes".to_string()),
+                arguments: Some(rmcp::object!({})),
+            })
+            .await;
+        assert!(updated_list_result.is_ok());
+        let updated_list_response = updated_list_result.unwrap();
+        let updated_process_list = updated_list_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        println!("Updated process list: {}", updated_process_list);
+        assert!(
+            updated_process_list.contains("auto-added-process"),
+            "Process list should contain auto-added-process after config reload. List: {updated_process_list}"
         );
 
         // Clean up

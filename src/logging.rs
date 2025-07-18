@@ -192,3 +192,12 @@ pub fn log_debug(component: &str, message: &str, context: Option<&str>) {
         debug!(component = component, message = message);
     }
 }
+
+/// Log info information
+pub fn log_info(component: &str, message: &str, context: Option<&str>) {
+    if let Some(ctx) = context {
+        info!(component = component, message = message, context = ctx);
+    } else {
+        info!(component = component, message = message);
+    }
+}

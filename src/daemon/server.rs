@@ -54,7 +54,7 @@ use crate::cli::commands::{
     LogsResponse, ProcessInfo,
 };
 use crate::config::{
-    Environment, EnvironmentManager, GlobalConfig, ProcessDefinition, ProjectConfig,
+    ConfigWatcher, Environment, EnvironmentManager, GlobalConfig, ProcessDefinition, ProjectConfig,
 };
 use crate::database::Database;
 use crate::error::{Result, RunceptError};
@@ -67,6 +67,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::Duration;
+use tracing::{error, info};
 
 /// Configuration for the daemon server
 pub struct ServerConfig {
@@ -81,6 +82,7 @@ pub struct DaemonServer {
     pub process_manager: Arc<RwLock<ProcessManager>>,
     pub environment_manager: Arc<RwLock<EnvironmentManager>>,
     pub inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
+    pub config_watcher: Arc<RwLock<ConfigWatcher>>,
     pub start_time: SystemTime,
     pub shutdown_tx: Option<mpsc::Sender<()>>,
     pub current_environment_id: Arc<RwLock<Option<String>>>,
@@ -103,11 +105,17 @@ impl DaemonServer {
         let inactivity_scheduler = Arc::new(RwLock::new(None));
         let current_environment_id = Arc::new(RwLock::new(None));
 
+        // Create config watcher
+        let config_watcher = Arc::new(RwLock::new(
+            ConfigWatcher::new(environment_manager.clone())
+        ));
+
         Ok(Self {
             config,
             process_manager,
             environment_manager,
             inactivity_scheduler,
+            config_watcher,
             start_time: SystemTime::now(),
             shutdown_tx: None,
             current_environment_id,
@@ -143,6 +151,42 @@ impl DaemonServer {
         // Create shutdown channel
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
         self.shutdown_tx = Some(shutdown_tx);
+
+        // Start config file watcher
+        {
+            let mut config_watcher = self.config_watcher.write().await;
+            if let Err(e) = config_watcher.start() {
+                eprintln!("Warning: Failed to start config file watcher: {}", e);
+            } else {
+                // Start config watcher event loop in background
+                let config_watcher_clone = self.config_watcher.clone();
+                tokio::spawn(async move {
+                    // Take the receiver from the watcher to avoid deadlocks
+                    let receiver = {
+                        let mut watcher = config_watcher_clone.write().await;
+                        watcher.take_event_receiver()
+                    };
+
+                    if let Some(mut receiver) = receiver {
+                        info!("Config watcher event loop started");
+                        while let Some(event_result) = receiver.recv().await {
+                            match event_result {
+                                Ok(event) => {
+                                    let watcher = config_watcher_clone.read().await;
+                                    if let Err(e) = watcher.handle_file_event(event).await {
+                                        error!("Error handling file event: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("File watcher error: {}", e);
+                                }
+                            }
+                        }
+                        info!("Config watcher event loop ended");
+                    }
+                });
+            }
+        }
 
         loop {
             tokio::select! {
@@ -182,6 +226,7 @@ impl DaemonServer {
             process_manager: Arc::clone(&self.process_manager),
             environment_manager: Arc::clone(&self.environment_manager),
             inactivity_scheduler: Arc::clone(&self.inactivity_scheduler),
+            config_watcher: Arc::clone(&self.config_watcher),
             current_environment_id: Arc::clone(&self.current_environment_id),
             start_time: self.start_time,
             socket_path: self.config.socket_path.clone(),
@@ -228,6 +273,7 @@ pub struct ServerHandles {
     process_manager: Arc<RwLock<ProcessManager>>,
     environment_manager: Arc<RwLock<EnvironmentManager>>,
     inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
+    config_watcher: Arc<RwLock<ConfigWatcher>>,
     current_environment_id: Arc<RwLock<Option<String>>>,
     start_time: SystemTime,
     socket_path: PathBuf,
@@ -303,37 +349,99 @@ impl ServerHandles {
     }
     /// Handle a single client connection
     async fn handle_connection(&self, stream: UnixStream) -> Result<()> {
+        use crate::logging::{log_debug, log_error, log_info};
+
+        log_debug("daemon", "New client connection received", None);
+
         let mut reader = BufReader::new(stream);
         let mut request_line = String::new();
 
         // Read request line
-        let bytes_read = reader
-            .read_line(&mut request_line)
-            .await
-            .map_err(|e| RunceptError::ConnectionError(format!("Failed to read request: {e}")))?;
+        let bytes_read = reader.read_line(&mut request_line).await.map_err(|e| {
+            let err = RunceptError::ConnectionError(format!("Failed to read request: {e}"));
+            log_error("daemon", &format!("Connection error: {err}"), None);
+            err
+        })?;
 
         if bytes_read == 0 {
+            log_debug("daemon", "Client disconnected (0 bytes read)", None);
             return Ok(()); // Client disconnected
         }
 
+        log_debug(
+            "daemon",
+            &format!(
+                "Received request ({} bytes): {}",
+                bytes_read,
+                request_line.trim()
+            ),
+            None,
+        );
+
         // Parse request
-        let request: DaemonRequest = serde_json::from_str(request_line.trim())
-            .map_err(|e| RunceptError::SerializationError(format!("Invalid request: {e}")))?;
+        let request: DaemonRequest = serde_json::from_str(request_line.trim()).map_err(|e| {
+            let err = RunceptError::SerializationError(format!("Invalid request: {e}"));
+            log_error(
+                "daemon",
+                &format!("Failed to parse request '{}': {err}", request_line.trim()),
+                None,
+            );
+            err
+        })?;
+
+        log_info(
+            "daemon",
+            &format!("Processing request: {request:?}"),
+            None,
+        );
 
         // Process request
-        let response = self.process_request(request).await?;
+        let response = match self.process_request(request).await {
+            Ok(resp) => {
+                log_debug(
+                    "daemon",
+                    &format!("Request processed successfully: {resp:?}"),
+                    None,
+                );
+                resp
+            }
+            Err(e) => {
+                log_error("daemon", &format!("Request processing failed: {e}"), None);
+                DaemonResponse::Error {
+                    error: format!("Internal server error: {e}"),
+                }
+            }
+        };
 
         // Send response
         let response_json = serde_json::to_string(&response).map_err(|e| {
-            RunceptError::SerializationError(format!("Failed to serialize response: {e}"))
+            let err =
+                RunceptError::SerializationError(format!("Failed to serialize response: {e}"));
+            log_error(
+                "daemon",
+                &format!("Serialization error for response {response:?}: {err}"),
+                None,
+            );
+            err
         })?;
+
+        log_debug(
+            "daemon",
+            &format!("Sending response: {response_json}"),
+            None,
+        );
 
         let mut stream = reader.into_inner();
         stream
             .write_all(format!("{response_json}\n").as_bytes())
             .await
-            .map_err(|e| RunceptError::ConnectionError(format!("Failed to send response: {e}")))?;
+            .map_err(|e| {
+                let err = RunceptError::ConnectionError(format!("Failed to send response: {e}"));
+                log_error("daemon", &format!("Failed to send response: {err}"), None);
+                err
+            })?;
 
+        log_debug("daemon", "Response sent successfully", None);
         Ok(())
     }
 
@@ -427,7 +535,16 @@ impl ServerHandles {
                 }
 
                 // Store current environment ID
-                *self.current_environment_id.write().await = Some(env_id);
+                *self.current_environment_id.write().await = Some(env_id.clone());
+
+                // Start watching the config file for this environment
+                let config_path = project_path.join(".runcept.toml");
+                {
+                    let mut config_watcher = self.config_watcher.write().await;
+                    if let Err(e) = config_watcher.watch_config_file(&config_path, &env_id) {
+                        eprintln!("Warning: Failed to watch config file {}: {}", config_path.display(), e);
+                    }
+                }
 
                 // Start inactivity scheduler for the environment
                 let mut scheduler_guard = self.inactivity_scheduler.write().await;
@@ -455,6 +572,15 @@ impl ServerHandles {
 
             match env_manager.deactivate_environment(&env_id).await {
                 Ok(_) => {
+                    // Stop watching config files for this environment
+                    if let Some(env) = env_manager.get_environment(&env_id) {
+                        let config_path = env.project_path.join(".runcept.toml");
+                        let mut config_watcher = self.config_watcher.write().await;
+                        if let Err(e) = config_watcher.unwatch_config_file(&config_path) {
+                            eprintln!("Warning: Failed to unwatch config file {}: {}", config_path.display(), e);
+                        }
+                    }
+
                     // Clear current environment
                     *self.current_environment_id.write().await = None;
 
@@ -887,12 +1013,40 @@ impl ServerHandles {
         process: ProcessDefinition,
         environment: Option<String>,
     ) -> Result<DaemonResponse> {
-        let (_env_id, resolved_env) = match self.resolve_environment(environment.clone()).await? {
-            Some((id, env)) => (id, env),
+        use crate::logging::{log_debug, log_error, log_info};
+
+        log_info(
+            "daemon",
+            &format!(
+                "Adding process '{}' to environment {:?}",
+                process.name, environment
+            ),
+            None,
+        );
+        log_debug(
+            "daemon",
+            &format!("Process definition: {process:?}"),
+            None,
+        );
+
+        let (env_id, resolved_env) = match self.resolve_environment(environment.clone()).await? {
+            Some((id, env)) => {
+                log_debug(
+                    "daemon",
+                    &format!("Resolved environment: {} -> {}", id, env.name),
+                    None,
+                );
+                (id, env)
+            }
             None => {
                 let env_msg = environment
                     .map(|e| format!("Environment '{e}' not found or not active"))
                     .unwrap_or_else(|| "No active environment".to_string());
+                log_error(
+                    "daemon",
+                    &format!("Environment resolution failed: {env_msg}"),
+                    None,
+                );
                 return Ok(DaemonResponse::Error { error: env_msg });
             }
         };
@@ -900,11 +1054,35 @@ impl ServerHandles {
         // Get the project config path
         let project_path = resolved_env.project_path.clone();
         let config_path = project_path.join(".runcept.toml");
+        log_debug(
+            "daemon",
+            &format!("Loading config from: {}", config_path.display()),
+            None,
+        );
 
         // Load current config
         let mut project_config = match ProjectConfig::load_from_path(&config_path).await {
-            Ok(config) => config,
+            Ok(config) => {
+                log_debug(
+                    "daemon",
+                    &format!(
+                        "Successfully loaded config with {} processes",
+                        config.processes.len()
+                    ),
+                    None,
+                );
+                config
+            }
             Err(e) => {
+                log_error(
+                    "daemon",
+                    &format!(
+                        "Failed to load project config from {}: {}",
+                        config_path.display(),
+                        e
+                    ),
+                    None,
+                );
                 return Ok(DaemonResponse::Error {
                     error: format!("Failed to load project config: {e}"),
                 });
@@ -913,30 +1091,59 @@ impl ServerHandles {
 
         // Check if process already exists
         if project_config.processes.contains_key(&process.name) {
-            return Ok(DaemonResponse::Error {
-                error: format!(
-                    "Process '{}' already exists in environment '{}'",
-                    process.name, resolved_env.name
-                ),
-            });
+            let error_msg = format!(
+                "Process '{}' already exists in environment '{}'",
+                process.name, resolved_env.name
+            );
+            log_error("daemon", &error_msg, None);
+            return Ok(DaemonResponse::Error { error: error_msg });
         }
+
+        log_debug(
+            "daemon",
+            &format!("Adding process '{}' to config", process.name),
+            None,
+        );
 
         // Add the new process
         project_config
             .processes
             .insert(process.name.clone(), process.clone());
 
+        log_debug(
+            "daemon",
+            &format!("Saving updated config to: {}", config_path.display()),
+            None,
+        );
+
         // Save the updated config
         match project_config.save_to_path(&config_path).await {
-            Ok(_) => Ok(DaemonResponse::Success {
-                message: format!(
+            Ok(_) => {
+                // Reload the environment configuration to reflect the changes
+                let mut env_manager = self.environment_manager.write().await;
+                if let Err(e) = env_manager.reload_environment_config(&env_id).await {
+                    log_error(
+                        "daemon",
+                        &format!("Failed to reload environment config: {e}"),
+                        None,
+                    );
+                    // Don't fail the operation, just log the warning
+                }
+
+                let success_msg = format!(
                     "Process '{}' added successfully to environment '{}'",
                     process.name, resolved_env.name
-                ),
-            }),
-            Err(e) => Ok(DaemonResponse::Error {
-                error: format!("Failed to save project config: {e}"),
-            }),
+                );
+                log_info("daemon", &success_msg, None);
+                Ok(DaemonResponse::Success {
+                    message: success_msg,
+                })
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to save project config: {e}");
+                log_error("daemon", &error_msg, None);
+                Ok(DaemonResponse::Error { error: error_msg })
+            }
         }
     }
 

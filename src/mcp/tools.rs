@@ -13,17 +13,55 @@ use tokio::sync::RwLock;
 async fn send_daemon_request(
     request: DaemonRequest,
 ) -> std::result::Result<DaemonResponse, McpError> {
-    let config_dir = crate::config::global::get_config_dir()
-        .map_err(|e| McpError::internal_error(format!("Failed to get config dir: {e}"), None))?;
+    use crate::logging::{log_debug, log_error, log_info};
+
+    log_debug(
+        "mcp",
+        &format!("Sending daemon request: {request:?}"),
+        None,
+    );
+
+    let config_dir = crate::config::global::get_config_dir().map_err(|e| {
+        let err = McpError::internal_error(format!("Failed to get config dir: {e}"), None);
+        log_error("mcp", &format!("Config dir error: {err}"), None);
+        err
+    })?;
     let socket_path = config_dir.join("daemon.sock");
 
-    let stream = UnixStream::connect(socket_path)
-        .await
-        .map_err(|e| McpError::internal_error(format!("Failed to connect to daemon: {e}"), None))?;
+    log_debug(
+        "mcp",
+        &format!("Connecting to daemon socket: {}", socket_path.display()),
+        None,
+    );
+
+    let stream = UnixStream::connect(&socket_path).await.map_err(|e| {
+        let err = McpError::internal_error(format!("Failed to connect to daemon: {e}"), None);
+        log_error(
+            "mcp",
+            &format!("Connection error to {}: {}", socket_path.display(), err),
+            None,
+        );
+        err
+    })?;
+
+    log_debug("mcp", "Connected to daemon successfully", None);
 
     let mut reader = BufReader::new(stream);
-    let request_json = serde_json::to_string(&request)
-        .map_err(|e| McpError::internal_error(format!("Failed to serialize request: {e}"), None))?;
+    let request_json = serde_json::to_string(&request).map_err(|e| {
+        let err = McpError::internal_error(format!("Failed to serialize request: {e}"), None);
+        log_error(
+            "mcp",
+            &format!("Request serialization error: {err}"),
+            None,
+        );
+        err
+    })?;
+
+    log_debug(
+        "mcp",
+        &format!("Sending request JSON: {request_json}"),
+        None,
+    );
 
     // Send request
     {
@@ -31,19 +69,61 @@ async fn send_daemon_request(
         writer
             .write_all(format!("{request_json}\n").as_bytes())
             .await
-            .map_err(|e| McpError::internal_error(format!("Failed to send request: {e}"), None))?;
+            .map_err(|e| {
+                let err = McpError::internal_error(format!("Failed to send request: {e}"), None);
+                log_error("mcp", &format!("Write error: {err}"), None);
+                err
+            })?;
     }
+
+    log_debug("mcp", "Request sent, waiting for response", None);
 
     // Read response
     let mut response_line = String::new();
-    reader
-        .read_line(&mut response_line)
-        .await
-        .map_err(|e| McpError::internal_error(format!("Failed to read response: {e}"), None))?;
+    let bytes_read = reader.read_line(&mut response_line).await.map_err(|e| {
+        let err = McpError::internal_error(format!("Failed to read response: {e}"), None);
+        log_error("mcp", &format!("Read error: {err}"), None);
+        err
+    })?;
 
-    let response: DaemonResponse = serde_json::from_str(&response_line)
-        .map_err(|e| McpError::internal_error(format!("Failed to parse response: {e}"), None))?;
+    log_debug(
+        "mcp",
+        &format!(
+            "Received response ({} bytes): {}",
+            bytes_read,
+            response_line.trim()
+        ),
+        None,
+    );
 
+    if bytes_read == 0 {
+        let err = McpError::internal_error(
+            "Received empty response from daemon (EOF)".to_string(),
+            None,
+        );
+        log_error("mcp", &format!("Empty response error: {err}"), None);
+        return Err(err);
+    }
+
+    let response: DaemonResponse = serde_json::from_str(&response_line).map_err(|e| {
+        let err = McpError::internal_error(format!("Failed to parse response: {e}"), None);
+        log_error(
+            "mcp",
+            &format!(
+                "Response parsing error for '{}': {}",
+                response_line.trim(),
+                err
+            ),
+            None,
+        );
+        err
+    })?;
+
+    log_info(
+        "mcp",
+        &format!("Successfully received daemon response: {response:?}"),
+        None,
+    );
     Ok(response)
 }
 
@@ -509,28 +589,87 @@ impl RunceptTools {
             environment,
         }): Parameters<AddProcessParam>,
     ) -> Result<CallToolResult, McpError> {
+        use crate::logging::{log_debug, log_error, log_info};
+
+        log_info(
+            "mcp",
+            &format!(
+                "MCP add_process called: name='{name}', command='{command}', working_dir={working_dir:?}, environment={environment:?}"
+            ),
+            None,
+        );
+
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
+
+        // If no environment is explicitly provided, use the current MCP environment context
+        let target_environment = if environment.is_some() {
+            environment
+        } else {
+            let current_env = self.current_environment.read().await;
+            current_env.clone()
+        };
+
+        log_debug(
+            "mcp",
+            &format!("Using target environment: {target_environment:?}"),
+            None,
+        );
 
         // Create ProcessDefinition from parameters
         let process_def = crate::config::ProcessDefinition {
             name: name.clone(),
-            command,
-            working_dir,
+            command: command.clone(),
+            working_dir: working_dir.clone(),
             auto_restart,
-            health_check_url,
+            health_check_url: health_check_url.clone(),
             health_check_interval,
             depends_on: depends_on.unwrap_or_default(),
             env_vars: env_vars.unwrap_or_default(),
         };
 
+        log_debug(
+            "mcp",
+            &format!("Created ProcessDefinition: {process_def:?}"),
+            None,
+        );
+
         let request = DaemonRequest::AddProcess {
             process: process_def,
-            environment,
+            environment: target_environment,
         };
-        let response = send_daemon_request(request).await?;
+
+        log_debug(
+            "mcp",
+            "Sending AddProcess request to daemon",
+            None,
+        );
+
+        let response = match send_daemon_request(request).await {
+            Ok(resp) => {
+                log_debug(
+                    "mcp",
+                    &format!("Received daemon response: {resp:?}"),
+                    None,
+                );
+                resp
+            }
+            Err(e) => {
+                log_error(
+                    "mcp",
+                    &format!("Failed to send daemon request: {e}"),
+                    None,
+                );
+                return Err(e);
+            }
+        };
 
         let result_text = format_daemon_response(response);
+        log_info(
+            "mcp",
+            &format!("MCP add_process completed with result: {result_text}"),
+            None,
+        );
         Ok(CallToolResult::success(vec![Content::text(result_text)]))
     }
 
@@ -545,7 +684,18 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
-        let request = DaemonRequest::RemoveProcess { name, environment };
+        // If no environment is explicitly provided, use the current MCP environment context
+        let target_environment = if environment.is_some() {
+            environment
+        } else {
+            let current_env = self.current_environment.read().await;
+            current_env.clone()
+        };
+
+        let request = DaemonRequest::RemoveProcess {
+            name,
+            environment: target_environment,
+        };
         let response = send_daemon_request(request).await?;
 
         let result_text = format_daemon_response(response);
@@ -573,6 +723,14 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
+        // If no environment is explicitly provided, use the current MCP environment context
+        let target_environment = if environment.is_some() {
+            environment
+        } else {
+            let current_env = self.current_environment.read().await;
+            current_env.clone()
+        };
+
         // Create ProcessDefinition from parameters
         let process_def = crate::config::ProcessDefinition {
             name: name.clone(),
@@ -588,7 +746,7 @@ impl RunceptTools {
         let request = DaemonRequest::UpdateProcess {
             name,
             process: process_def,
-            environment,
+            environment: target_environment,
         };
         let response = send_daemon_request(request).await?;
 

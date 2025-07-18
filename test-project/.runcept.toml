@@ -1,17 +1,24 @@
 [environment]
 name = "test-project"
 
-[processes.web]
-name = "web"
-command = "python -m http.server 8000"
-working_dir = "."
-auto_restart = true
+[environment.env_vars]
 
 [processes.worker]
 name = "worker"
-command = "echo 'Hello from worker' && sleep 5"
+command = "npm run dev:wrangler:elon"
+auto_restart = true
+depends_on = []
+
+[processes.worker.env_vars]
+
+[processes.wrangler-dev-elon]
+name = "wrangler-dev-elon"
+command = "npm run dev:wrangler:elon"
 working_dir = "."
-auto_restart = false
+auto_restart = true
+depends_on = []
+
+[processes.wrangler-dev-elon.env_vars]
 
 [processes.database]
 name = "database"
@@ -19,3 +26,14 @@ command = "echo 'Starting fake database' && sleep 10"
 working_dir = "."
 auto_restart = true
 depends_on = []
+
+[processes.database.env_vars]
+
+[processes.web]
+name = "web"
+command = "python -m http.server 8000"
+working_dir = "."
+auto_restart = true
+depends_on = []
+
+[processes.web.env_vars]

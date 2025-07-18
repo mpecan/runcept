@@ -430,17 +430,28 @@ impl ProcessManager {
         let program = parts[0];
         let args = &parts[1..];
 
-        // Set up working directory
+        // Set up working directory - resolve relative paths against environment project path
         let work_dir = if let Some(wd) = &process_def.working_dir {
-            Path::new(wd)
+            let wd_path = Path::new(wd);
+            if wd_path.is_absolute() {
+                // Absolute path - use as-is
+                wd_path.to_path_buf()
+            } else if wd == "." {
+                // Current directory should resolve to environment project path
+                working_dir.to_path_buf()
+            } else {
+                // Relative path - resolve relative to environment project path
+                working_dir.join(wd_path)
+            }
         } else {
-            working_dir
+            // No working_dir specified - use environment project path
+            working_dir.to_path_buf()
         };
 
         // Create command
         let mut cmd = Command::new(program);
         cmd.args(args)
-            .current_dir(work_dir)
+            .current_dir(&work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());

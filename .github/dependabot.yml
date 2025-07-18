@@ -1,0 +1,45 @@
+version: 2
+updates:
+  # Rust dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "mpecan"
+    assignees:
+      - "mpecan"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      # Group patch updates to reduce PR noise
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      # Group dev dependencies
+      dev-dependencies:
+        patterns:
+          - "*"
+        dependency-type: "development"
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "mpecan"
+    assignees:
+      - "mpecan"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
