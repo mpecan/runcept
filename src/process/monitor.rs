@@ -417,43 +417,28 @@ pub struct ProcessWatcher {
 
 impl ProcessWatcher {
     pub async fn new(process: Process) -> Result<Self> {
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-        let process_clone = process.clone();
+        let shutdown_tx = Self::spawn_process_watch_task(process.clone());
 
-        // Spawn a task to watch the process
+        Ok(Self {
+            process,
+            shutdown_tx: Some(shutdown_tx),
+        })
+    }
+
+    /// Spawn a task to watch the process and return shutdown sender
+    fn spawn_process_watch_task(process: Process) -> mpsc::Sender<()> {
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+
         tokio::spawn(async move {
-            if let Some(pid) = process_clone.pid {
+            if let Some(pid) = process.pid {
                 loop {
                     tokio::select! {
                         _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                            // Check if process is still running by sending signal 0 (no-op signal)
-                            #[cfg(unix)]
-                            {
-                                use nix::sys::signal::kill;
-                                use nix::unistd::Pid;
-
-                                let nix_pid = Pid::from_raw(pid as i32);
-                                match kill(nix_pid, None) {
-                                    Ok(_) => {
-                                        // Process is still running
-                                        continue;
-                                    }
-                                    Err(_) => {
-                                        // Process is no longer running
-                                        break;
-                                    }
-                                }
-                            }
-
-                            #[cfg(not(unix))]
-                            {
-                                // On non-Unix systems, we'll implement a different approach
-                                // For now, just continue monitoring
-                                continue;
+                            if !Self::is_process_running(pid) {
+                                break;
                             }
                         }
                         _ = shutdown_rx.recv() => {
-                            // Shutdown requested
                             break;
                         }
                     }
@@ -461,10 +446,26 @@ impl ProcessWatcher {
             }
         });
 
-        Ok(Self {
-            process,
-            shutdown_tx: Some(shutdown_tx),
-        })
+        shutdown_tx
+    }
+
+    /// Check if a process is still running
+    fn is_process_running(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::kill;
+            use nix::unistd::Pid;
+
+            let nix_pid = Pid::from_raw(pid as i32);
+            kill(nix_pid, None).is_ok()
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-Unix systems, we'll implement a different approach
+            // For now, just assume the process is still running
+            true
+        }
     }
 
     pub async fn stop(mut self) -> Result<()> {
@@ -561,45 +562,32 @@ impl HealthCheck {
     }
 
     pub async fn execute(&self) -> Result<HealthResult> {
-        match self {
+        let start_time = Instant::now();
+        
+        let check_result = match self {
             HealthCheck::Http {
                 url,
                 timeout: check_timeout,
                 expected_status,
             } => {
                 let client = reqwest::Client::new();
-                let start_time = Instant::now();
-
-                match timeout(*check_timeout, client.get(url).send()).await {
+                let future = client.get(url).send();
+                
+                match timeout(*check_timeout, future).await {
                     Ok(Ok(response)) => {
-                        let is_healthy = response.status().as_u16() == *expected_status;
-                        Ok(HealthResult {
+                        let actual_status = response.status().as_u16();
+                        let is_healthy = actual_status == *expected_status;
+                        CheckResult {
                             is_healthy,
-                            response_time: start_time.elapsed(),
                             error_message: if is_healthy {
                                 None
                             } else {
-                                Some(format!(
-                                    "Expected status {}, got {}",
-                                    expected_status,
-                                    response.status()
-                                ))
+                                Some(format!("Expected status {expected_status}, got {actual_status}"))
                             },
-                            checked_at: Utc::now(),
-                        })
+                        }
                     }
-                    Ok(Err(e)) => Ok(HealthResult {
-                        is_healthy: false,
-                        response_time: start_time.elapsed(),
-                        error_message: Some(e.to_string()),
-                        checked_at: Utc::now(),
-                    }),
-                    Err(_) => Ok(HealthResult {
-                        is_healthy: false,
-                        response_time: start_time.elapsed(),
-                        error_message: Some("Request timeout".to_string()),
-                        checked_at: Utc::now(),
-                    }),
+                    Ok(Err(e)) => CheckResult::failure(e.to_string()),
+                    Err(_) => CheckResult::timeout("Request timeout"),
                 }
             }
             HealthCheck::Tcp {
@@ -607,28 +595,13 @@ impl HealthCheck {
                 port,
                 timeout: check_timeout,
             } => {
-                let start_time = Instant::now();
                 let addr = format!("{host}:{port}");
-
-                match timeout(*check_timeout, tokio::net::TcpStream::connect(&addr)).await {
-                    Ok(Ok(_)) => Ok(HealthResult {
-                        is_healthy: true,
-                        response_time: start_time.elapsed(),
-                        error_message: None,
-                        checked_at: Utc::now(),
-                    }),
-                    Ok(Err(e)) => Ok(HealthResult {
-                        is_healthy: false,
-                        response_time: start_time.elapsed(),
-                        error_message: Some(e.to_string()),
-                        checked_at: Utc::now(),
-                    }),
-                    Err(_) => Ok(HealthResult {
-                        is_healthy: false,
-                        response_time: start_time.elapsed(),
-                        error_message: Some("Connection timeout".to_string()),
-                        checked_at: Utc::now(),
-                    }),
+                let future = tokio::net::TcpStream::connect(&addr);
+                
+                match timeout(*check_timeout, future).await {
+                    Ok(Ok(_)) => CheckResult::success(),
+                    Ok(Err(e)) => CheckResult::failure(e.to_string()),
+                    Err(_) => CheckResult::timeout("Connection timeout"),
                 }
             }
             HealthCheck::Command {
@@ -638,45 +611,62 @@ impl HealthCheck {
                 timeout: check_timeout,
                 expected_exit_code,
             } => {
-                let start_time = Instant::now();
                 let mut cmd = tokio::process::Command::new(command);
                 cmd.args(args);
-
                 if let Some(wd) = working_dir {
                     cmd.current_dir(wd);
                 }
-
-                match timeout(*check_timeout, cmd.output()).await {
+                
+                let future = cmd.output();
+                match timeout(*check_timeout, future).await {
                     Ok(Ok(output)) => {
                         let exit_code = output.status.code().unwrap_or(-1);
                         let is_healthy = exit_code == *expected_exit_code;
-                        Ok(HealthResult {
+                        CheckResult {
                             is_healthy,
-                            response_time: start_time.elapsed(),
                             error_message: if is_healthy {
                                 None
                             } else {
-                                Some(format!(
-                                    "Expected exit code {expected_exit_code}, got {exit_code}"
-                                ))
+                                Some(format!("Expected exit code {expected_exit_code}, got {exit_code}"))
                             },
-                            checked_at: Utc::now(),
-                        })
+                        }
                     }
-                    Ok(Err(e)) => Ok(HealthResult {
-                        is_healthy: false,
-                        response_time: start_time.elapsed(),
-                        error_message: Some(e.to_string()),
-                        checked_at: Utc::now(),
-                    }),
-                    Err(_) => Ok(HealthResult {
-                        is_healthy: false,
-                        response_time: start_time.elapsed(),
-                        error_message: Some("Command timeout".to_string()),
-                        checked_at: Utc::now(),
-                    }),
+                    Ok(Err(e)) => CheckResult::failure(e.to_string()),
+                    Err(_) => CheckResult::timeout("Command timeout"),
                 }
             }
+        };
+        
+        Ok(HealthResult::from_check_result(check_result, start_time.elapsed()))
+    }
+}
+
+/// Helper struct for health check results before timing information
+#[derive(Debug, Clone)]
+struct CheckResult {
+    is_healthy: bool,
+    error_message: Option<String>,
+}
+
+impl CheckResult {
+    fn success() -> Self {
+        Self {
+            is_healthy: true,
+            error_message: None,
+        }
+    }
+    
+    fn failure(error: String) -> Self {
+        Self {
+            is_healthy: false,
+            error_message: Some(error),
+        }
+    }
+    
+    fn timeout(message: &str) -> Self {
+        Self {
+            is_healthy: false,
+            error_message: Some(message.to_string()),
         }
     }
 }
@@ -687,6 +677,18 @@ pub struct HealthResult {
     pub response_time: Duration,
     pub error_message: Option<String>,
     pub checked_at: DateTime<Utc>,
+}
+
+impl HealthResult {
+    /// Create a HealthResult from a CheckResult with timing information
+    fn from_check_result(check_result: CheckResult, response_time: Duration) -> Self {
+        Self {
+            is_healthy: check_result.is_healthy,
+            response_time,
+            error_message: check_result.error_message,
+            checked_at: Utc::now(),
+        }
+    }
 }
 
 pub struct HealthCheckManager {
@@ -715,30 +717,44 @@ impl HealthCheckManager {
                 Duration::from_secs(self.global_config.process.health_check_interval as u64),
             )?;
 
-            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-            let process_id = process.id.clone();
-            let mut check_interval = interval(Duration::from_secs(interval_secs as u64));
+            let shutdown_tx = Self::spawn_health_check_task(
+                health_check,
+                process.id.clone(),
+                Duration::from_secs(interval_secs as u64),
+            );
 
-            tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = check_interval.tick() => {
-                            if let Ok(_result) = health_check.execute().await {
-                                // TODO: Handle health check result
-                                // For now, we just execute the check
-                            }
-                        }
-                        _ = shutdown_rx.recv() => {
-                            break;
-                        }
-                    }
-                }
-            });
-
-            self.active_checks.insert(process_id, shutdown_tx);
+            self.active_checks.insert(process.id.clone(), shutdown_tx);
         }
 
         Ok(())
+    }
+
+    /// Spawn a health check task and return shutdown sender
+    fn spawn_health_check_task(
+        health_check: HealthCheck,
+        _process_id: String,
+        check_interval: Duration,
+    ) -> mpsc::Sender<()> {
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+        let mut interval_timer = interval(check_interval);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = interval_timer.tick() => {
+                        if let Ok(_result) = health_check.execute().await {
+                            // TODO: Handle health check result
+                            // For now, we just execute the check
+                        }
+                    }
+                    _ = shutdown_rx.recv() => {
+                        break;
+                    }
+                }
+            }
+        });
+
+        shutdown_tx
     }
 
     pub async fn unschedule_health_check(&mut self, process_id: &str) {
@@ -770,19 +786,30 @@ impl ProcessStatusTracker {
     }
 
     pub fn update_status(&mut self, process_id: &str, status: ProcessStatus) {
-        let entry = StatusEntry {
+        let entry = Self::create_status_entry(status);
+        let history = self.get_or_create_history(process_id);
+        
+        history.push(entry);
+        Self::limit_history_size(history);
+    }
+
+    /// Create a status entry with current timestamp
+    fn create_status_entry(status: ProcessStatus) -> StatusEntry {
+        StatusEntry {
             status,
             timestamp: Utc::now(),
-        };
+        }
+    }
 
-        let history = self
-            .status_history
+    /// Get or create history for a process
+    fn get_or_create_history(&mut self, process_id: &str) -> &mut Vec<StatusEntry> {
+        self.status_history
             .entry(process_id.to_string())
-            .or_default();
+            .or_default()
+    }
 
-        history.push(entry);
-
-        // Limit history size
+    /// Limit history size to prevent memory growth
+    fn limit_history_size(history: &mut Vec<StatusEntry>) {
         const MAX_HISTORY_SIZE: usize = 100;
         if history.len() > MAX_HISTORY_SIZE {
             history.remove(0);
@@ -818,7 +845,7 @@ impl CrashDetector {
         global_config: &GlobalConfig,
     ) -> Result<bool> {
         // Only handle crashes and failures
-        if !matches!(exit_status, ProcessStatus::Crashed | ProcessStatus::Failed) {
+        if !Self::should_handle_exit_status(&exit_status) {
             return Ok(false);
         }
 
@@ -827,14 +854,10 @@ impl CrashDetector {
         let restart_delay = Duration::from_secs(global_config.process.restart_delay as u64);
 
         // Get or create restart attempt history
-        let attempts = self
-            .restart_attempts
-            .entry(process_id.to_string())
-            .or_default();
+        let attempts = self.get_or_create_attempts(process_id);
 
-        // Clean up old attempts (older than 1 hour)
-        let cutoff_time = now - chrono::Duration::hours(1);
-        attempts.retain(|&attempt_time| attempt_time > cutoff_time);
+        // Clean up old attempts
+        Self::cleanup_old_attempts(attempts, now);
 
         // Check if we've exceeded max attempts
         if attempts.len() >= max_attempts as usize {
@@ -848,6 +871,24 @@ impl CrashDetector {
         tokio::time::sleep(restart_delay).await;
 
         Ok(true) // Should restart
+    }
+
+    /// Check if we should handle this exit status
+    fn should_handle_exit_status(exit_status: &ProcessStatus) -> bool {
+        matches!(exit_status, ProcessStatus::Crashed | ProcessStatus::Failed)
+    }
+
+    /// Get or create restart attempts for a process
+    fn get_or_create_attempts(&mut self, process_id: &str) -> &mut Vec<DateTime<Utc>> {
+        self.restart_attempts
+            .entry(process_id.to_string())
+            .or_default()
+    }
+
+    /// Clean up old restart attempts (older than 1 hour)
+    fn cleanup_old_attempts(attempts: &mut Vec<DateTime<Utc>>, now: DateTime<Utc>) {
+        let cutoff_time = now - chrono::Duration::hours(1);
+        attempts.retain(|&attempt_time| attempt_time > cutoff_time);
     }
 
     pub fn get_restart_attempts(&self, process_id: &str) -> Vec<DateTime<Utc>> {
