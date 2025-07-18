@@ -236,6 +236,63 @@ impl<'a> QueryManager<'a> {
         Ok(check_result == "ok")
     }
 
+    /// Get all processes marked as running in the database
+    pub async fn get_running_processes(&self) -> Result<Vec<(String, String, Option<i64>)>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, environment_id, pid 
+            FROM processes 
+            WHERE status = 'running' OR status = 'starting'
+            ORDER BY environment_id, id
+            "#,
+        )
+        .fetch_all(self.pool)
+        .await?;
+
+        let mut processes = Vec::new();
+        for row in rows {
+            let process_id: String = row.get("id");
+            let environment_id: String = row.get("environment_id");
+            let pid: Option<i64> = row.get("pid");
+            processes.push((process_id, environment_id, pid));
+        }
+
+        Ok(processes)
+    }
+
+    /// Update process status in the database
+    pub async fn update_process_status(&self, process_id: &str, status: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processes 
+            SET status = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+            "#,
+        )
+        .bind(status)
+        .bind(process_id)
+        .execute(self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Clear process PID in the database
+    pub async fn clear_process_pid(&self, process_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE processes 
+            SET pid = NULL, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+            "#,
+        )
+        .bind(process_id)
+        .execute(self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     // Environment database operations
 
     /// Insert a new environment into the database

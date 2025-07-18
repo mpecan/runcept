@@ -55,7 +55,7 @@ impl DaemonServer {
         // Start the config event loop for the environment manager
         EnvironmentManager::start_config_event_loop(environment_manager.clone());
 
-        Ok(Self {
+        let server = Self {
             config,
             process_manager,
             environment_manager,
@@ -63,7 +63,36 @@ impl DaemonServer {
             start_time: SystemTime::now(),
             shutdown_tx: None,
             current_environment_id: Arc::new(RwLock::new(None)),
-        })
+        };
+
+        // Perform startup cleanup if database is available
+        if let Some(database) = &server.config.database {
+            server.perform_startup_cleanup(database).await?;
+        }
+
+        Ok(server)
+    }
+
+    /// Perform startup cleanup of stale processes
+    async fn perform_startup_cleanup(&self, database: &crate::database::Database) -> Result<()> {
+        info!("Performing startup cleanup of stale processes");
+
+        // Create query manager for database operations
+        let query_manager = crate::database::QueryManager::new(database.get_pool());
+
+        // Cleanup stale processes via the runtime manager
+        {
+            let mut process_manager = self.process_manager.write().await;
+            process_manager
+                .runtime_manager
+                .write()
+                .await
+                .cleanup_stale_processes(&query_manager)
+                .await?;
+        }
+
+        info!("Startup cleanup completed");
+        Ok(())
     }
 
     /// Start the daemon server
@@ -163,6 +192,39 @@ impl DaemonServer {
     /// Shutdown the server
     pub async fn shutdown(&self) -> Result<()> {
         info!("Shutting down daemon server");
+
+        // Stop all running processes gracefully before shutting down
+        {
+            info!("Stopping all running processes before daemon shutdown");
+            let mut process_manager = self.process_manager.write().await;
+
+            // Get all active environments and stop their processes
+            let env_manager = self.environment_manager.read().await;
+            let active_environments = env_manager.get_active_environments();
+
+            for (env_id, _) in active_environments {
+                info!("Stopping processes in environment '{}'", env_id);
+
+                // Stop all processes in this environment
+                if let Err(e) = process_manager
+                    .runtime_manager
+                    .write()
+                    .await
+                    .stop_all_processes(&env_id)
+                    .await
+                {
+                    error!(
+                        "Failed to stop processes in environment '{}': {}",
+                        env_id, e
+                    );
+                }
+            }
+
+            // Give processes time to stop gracefully
+            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+            info!("All processes have been stopped");
+        }
 
         // Stop inactivity scheduler
         {

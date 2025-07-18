@@ -550,6 +550,81 @@ impl ProcessRuntimeManager {
         }
     }
 
+    /// Check if a process is still alive by PID
+    pub fn is_process_alive(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::kill;
+            use nix::unistd::Pid;
+
+            let nix_pid = Pid::from_raw(pid as i32);
+            kill(nix_pid, None).is_ok()
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-Unix systems, we'll implement a different approach
+            // For now, just assume the process is still running
+            true
+        }
+    }
+
+    /// Clean up stale processes that are marked as running in the database but no longer exist
+    pub async fn cleanup_stale_processes(
+        &mut self,
+        query_manager: &crate::database::QueryManager<'_>,
+    ) -> Result<()> {
+        info!("Cleaning up stale processes from database");
+
+        // Get all processes marked as running in the database
+        let running_processes = query_manager.get_running_processes().await?;
+
+        let mut cleaned_up = 0;
+
+        for (process_id, environment_id, pid) in running_processes {
+            let should_cleanup = if let Some(pid) = pid {
+                // Check if the process is still alive
+                !Self::is_process_alive(pid as u32)
+            } else {
+                // No PID means it was never properly started
+                true
+            };
+
+            if should_cleanup {
+                info!(
+                    "Cleaning up stale process '{}' in environment '{}' (PID: {:?})",
+                    process_id, environment_id, pid
+                );
+
+                // Update status in database
+                if let Err(e) = query_manager
+                    .update_process_status(&process_id, "stopped")
+                    .await
+                {
+                    error!(
+                        "Failed to update process status for '{}': {}",
+                        process_id, e
+                    );
+                }
+
+                // Clear PID in database
+                if let Err(e) = query_manager.clear_process_pid(&process_id).await {
+                    error!("Failed to clear PID for process '{}': {}", process_id, e);
+                }
+
+                cleaned_up += 1;
+            }
+        }
+
+        if cleaned_up > 0 {
+            info!("Cleaned up {} stale processes", cleaned_up);
+        } else {
+            info!("No stale processes found");
+        }
+
+        Ok(())
+    }
+
     /// Spawn a task to capture and log output from a process stream
     fn spawn_output_logging_task<T>(stream: T, logger: Arc<Mutex<ProcessLogger>>, is_stdout: bool)
     where
