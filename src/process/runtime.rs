@@ -137,6 +137,7 @@ impl ProcessRuntimeManager {
             )))?;
 
         // Get process handle and attempt graceful shutdown
+        let mut process_killed = false;
         if let Some(env_handles) = self.process_handles.get(environment_id) {
             if let Some(handle) = env_handles.get(name) {
                 // Send shutdown signal first
@@ -164,6 +165,7 @@ impl ProcessRuntimeManager {
                                 "Process '{}' in environment '{}' exited gracefully",
                                 name, environment_id
                             );
+                            process_killed = true;
                         }
                         Ok(None) => {
                             // Process is still running, force kill
@@ -178,6 +180,8 @@ impl ProcessRuntimeManager {
                                     "Failed to force kill process '{}' in environment '{}': {}",
                                     name, environment_id, e
                                 );
+                            } else {
+                                process_killed = true;
                             }
                         }
                         Err(e) => {
@@ -194,17 +198,77 @@ impl ProcessRuntimeManager {
             }
         }
 
-        // Update process status to stopped in database
-        self.process_repository.update_process_status(&process_id, "stopped").await
-            .map_err(|e| RunceptError::ProcessError(format!(
-                "Failed to update process status to stopped: {}", e
-            )))?;
-        
-        // Clear the PID in database
-        self.process_repository.clear_process_pid(&process_id).await
-            .map_err(|e| RunceptError::ProcessError(format!(
-                "Failed to clear process PID: {}", e
-            )))?;
+        // If we don't have a handle or couldn't kill via handle, try to kill by PID
+        if !process_killed {
+            // Get the process from database to find its PID
+            if let Ok(Some(process)) = self.process_repository.get_process_by_id(&process_id).await {
+                if let Some(pid) = process.pid {
+                    warn!(
+                        "Process '{}' in environment '{}' has no handle, attempting to kill by PID {}",
+                        name, environment_id, pid
+                    );
+                    
+                    // Try to kill the process by PID using system call
+                    if let Err(e) = self.kill_process_by_pid(pid as u32).await {
+                        error!(
+                            "Failed to kill process '{}' in environment '{}' by PID {}: {}",
+                            name, environment_id, pid, e
+                        );
+                    } else {
+                        info!(
+                            "Successfully killed process '{}' in environment '{}' by PID {}",
+                            name, environment_id, pid
+                        );
+                        process_killed = true;
+                    }
+                }
+            }
+        }
+
+        // Only update database status if we successfully killed the process or it's not running
+        if process_killed {
+            // Update process status to stopped in database
+            self.process_repository.update_process_status(&process_id, "stopped").await
+                .map_err(|e| RunceptError::ProcessError(format!(
+                    "Failed to update process status to stopped: {}", e
+                )))?;
+            
+            // Clear the PID in database
+            self.process_repository.clear_process_pid(&process_id).await
+                .map_err(|e| RunceptError::ProcessError(format!(
+                    "Failed to clear process PID: {}", e
+                )))?;
+        } else {
+            // If we couldn't kill the process, don't mark it as stopped
+            // Check if the process is actually still alive
+            if let Ok(Some(process)) = self.process_repository.get_process_by_id(&process_id).await {
+                if let Some(pid) = process.pid {
+                    if Self::is_process_alive(pid as u32) {
+                        return Err(RunceptError::ProcessError(format!(
+                            "Failed to stop process '{}' in environment '{}': process is still running with PID {}",
+                            name, environment_id, pid
+                        )));
+                    } else {
+                        // Process is not alive anymore, safe to mark as stopped
+                        self.process_repository.update_process_status(&process_id, "stopped").await
+                            .map_err(|e| RunceptError::ProcessError(format!(
+                                "Failed to update process status to stopped: {}", e
+                            )))?;
+                        
+                        self.process_repository.clear_process_pid(&process_id).await
+                            .map_err(|e| RunceptError::ProcessError(format!(
+                                "Failed to clear process PID: {}", e
+                            )))?;
+                    }
+                } else {
+                    // No PID, safe to mark as stopped
+                    self.process_repository.update_process_status(&process_id, "stopped").await
+                        .map_err(|e| RunceptError::ProcessError(format!(
+                            "Failed to update process status to stopped: {}", e
+                        )))?;
+                }
+            }
+        }
 
         info!(
             "Successfully stopped process '{}' in environment '{}'",
@@ -468,23 +532,70 @@ impl ProcessRuntimeManager {
         let process_id = format!("{}:{}", environment_id, process_def.name);
 
         // Store process in database with "starting" status
-        self.process_repository
-            .insert_process(
-                &process_id,
-                &process_def.name,
-                &process_def.command,
-                &working_dir.to_string_lossy(),
-                environment_id,
-                "starting",
-                pid,
-            )
-            .await
-            .map_err(|e| {
-                RunceptError::ProcessError(format!(
-                    "Failed to store process '{}' in database: {}",
-                    process_def.name, e
-                ))
-            })?;
+        // Check if process record already exists and update it, otherwise insert new one
+        if let Ok(Some(_existing_process)) = self.process_repository.get_process_by_id(&process_id).await {
+            // Update existing process record
+            self.process_repository
+                .update_process_command(&process_id, &process_def.command)
+                .await
+                .map_err(|e| {
+                    RunceptError::ProcessError(format!(
+                        "Failed to update process '{}' command in database: {}",
+                        process_def.name, e
+                    ))
+                })?;
+            
+            self.process_repository
+                .update_process_working_dir(&process_id, &working_dir.to_string_lossy())
+                .await
+                .map_err(|e| {
+                    RunceptError::ProcessError(format!(
+                        "Failed to update process '{}' working directory in database: {}",
+                        process_def.name, e
+                    ))
+                })?;
+            
+            self.process_repository
+                .update_process_status(&process_id, "starting")
+                .await
+                .map_err(|e| {
+                    RunceptError::ProcessError(format!(
+                        "Failed to update process '{}' status in database: {}",
+                        process_def.name, e
+                    ))
+                })?;
+            
+            if let Some(pid) = pid {
+                self.process_repository
+                    .set_process_pid(&process_id, pid)
+                    .await
+                    .map_err(|e| {
+                        RunceptError::ProcessError(format!(
+                            "Failed to set process '{}' PID in database: {}",
+                            process_def.name, e
+                        ))
+                    })?;
+            }
+        } else {
+            // Insert new process record
+            self.process_repository
+                .insert_process(
+                    &process_id,
+                    &process_def.name,
+                    &process_def.command,
+                    &working_dir.to_string_lossy(),
+                    environment_id,
+                    "starting",
+                    pid,
+                )
+                .await
+                .map_err(|e| {
+                    RunceptError::ProcessError(format!(
+                        "Failed to store process '{}' in database: {}",
+                        process_def.name, e
+                    ))
+                })?;
+        }
 
         // Create process logger
         let logger = ProcessLogger::new(process_def.name.clone(), working_dir.to_path_buf())
@@ -637,6 +748,72 @@ impl ProcessRuntimeManager {
             // On non-Unix systems, we'll implement a different approach
             // For now, just assume the process is still running
             true
+        }
+    }
+
+    /// Kill a process by PID using system calls
+    async fn kill_process_by_pid(&self, pid: u32) -> Result<()> {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+
+            // Handle potential invalid PIDs gracefully
+            if pid == 0 {
+                return Err(RunceptError::ProcessError("Invalid PID: 0".to_string()));
+            }
+            
+            let nix_pid = match Pid::from_raw(pid as i32) {
+                pid if pid.as_raw() > 0 => pid,
+                _ => return Err(RunceptError::ProcessError(format!("Invalid PID: {}", pid))),
+            };
+            
+            // First try SIGTERM (graceful shutdown)
+            match kill(nix_pid, Signal::SIGTERM) {
+                Ok(_) => {
+                    info!("Sent SIGTERM to process {}", pid);
+                    
+                    // Wait a bit for graceful shutdown
+                    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                    
+                    // Check if process is still alive
+                    if Self::is_process_alive(pid) {
+                        warn!("Process {} did not exit gracefully, sending SIGKILL", pid);
+                        
+                        // Force kill with SIGKILL
+                        match kill(nix_pid, Signal::SIGKILL) {
+                            Ok(_) => {
+                                info!("Sent SIGKILL to process {}", pid);
+                                Ok(())
+                            }
+                            Err(e) => {
+                                Err(RunceptError::ProcessError(format!(
+                                    "Failed to send SIGKILL to process {}: {}",
+                                    pid, e
+                                )))
+                            }
+                        }
+                    } else {
+                        info!("Process {} exited gracefully after SIGTERM", pid);
+                        Ok(())
+                    }
+                }
+                Err(e) => {
+                    Err(RunceptError::ProcessError(format!(
+                        "Failed to send SIGTERM to process {}: {}",
+                        pid, e
+                    )))
+                }
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-Unix systems, we'll implement a different approach
+            // For now, return an error indicating it's not supported
+            Err(RunceptError::ProcessError(
+                "Process killing by PID is not supported on this platform".to_string()
+            ))
         }
     }
 
