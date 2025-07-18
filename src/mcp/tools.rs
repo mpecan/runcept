@@ -15,11 +15,7 @@ async fn send_daemon_request(
 ) -> std::result::Result<DaemonResponse, McpError> {
     use crate::logging::{log_debug, log_error, log_info};
 
-    log_debug(
-        "mcp",
-        &format!("Sending daemon request: {request:?}"),
-        None,
-    );
+    log_debug("mcp", &format!("Sending daemon request: {request:?}"), None);
 
     let config_dir = crate::config::global::get_config_dir().map_err(|e| {
         let err = McpError::internal_error(format!("Failed to get config dir: {e}"), None);
@@ -49,11 +45,7 @@ async fn send_daemon_request(
     let mut reader = BufReader::new(stream);
     let request_json = serde_json::to_string(&request).map_err(|e| {
         let err = McpError::internal_error(format!("Failed to serialize request: {e}"), None);
-        log_error(
-            "mcp",
-            &format!("Request serialization error: {err}"),
-            None,
-        );
+        log_error("mcp", &format!("Request serialization error: {err}"), None);
         err
     })?;
 
@@ -639,27 +631,15 @@ impl RunceptTools {
             environment: target_environment,
         };
 
-        log_debug(
-            "mcp",
-            "Sending AddProcess request to daemon",
-            None,
-        );
+        log_debug("mcp", "Sending AddProcess request to daemon", None);
 
         let response = match send_daemon_request(request).await {
             Ok(resp) => {
-                log_debug(
-                    "mcp",
-                    &format!("Received daemon response: {resp:?}"),
-                    None,
-                );
+                log_debug("mcp", &format!("Received daemon response: {resp:?}"), None);
                 resp
             }
             Err(e) => {
-                log_error(
-                    "mcp",
-                    &format!("Failed to send daemon request: {e}"),
-                    None,
-                );
+                log_error("mcp", &format!("Failed to send daemon request: {e}"), None);
                 return Err(e);
             }
         };

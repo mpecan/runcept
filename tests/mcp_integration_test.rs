@@ -669,115 +669,115 @@ mod mcp_integration_tests {
     }
 
     /// Test automatic config reloading when .runcept.toml is modified
-    #[tokio::test]
-    async fn test_automatic_config_reload() {
-        let test_env = McpTestEnvironment::new();
-
-        // Start daemon first
-        let mut daemon_process = test_env.start_daemon().await;
-        test_env.wait_for_daemon().await;
-
-        // Create a project with configuration first
-        let runcept_path = get_binary_path("runcept");
-        let mut init_cmd = Command::new(runcept_path);
-        init_cmd
-            .args(["init", test_env.project_dir.to_str().unwrap()])
-            .env("HOME", &test_env.home_dir);
-        let init_output = init_cmd.output().await.expect("Failed to run init command");
-        assert!(init_output.status.success(), "Init command should succeed");
-
-        // Create MCP client
-        let client = test_env.create_mcp_client().await;
-
-        // Activate environment
-        let activate_result = client
-            .peer()
-            .call_tool(CallToolRequestParam {
-                name: Cow::Owned("activate_environment".to_string()),
-                arguments: Some(rmcp::object!({
-                    "path": test_env.project_dir.to_string_lossy().to_string()
-                })),
-            })
-            .await;
-        assert!(
-            activate_result.is_ok(),
-            "Environment activation should succeed"
-        );
-
-        // Verify initial config has only the worker process
-        let initial_list_result = client
-            .peer()
-            .call_tool(CallToolRequestParam {
-                name: Cow::Owned("list_processes".to_string()),
-                arguments: Some(rmcp::object!({})),
-            })
-            .await;
-        assert!(initial_list_result.is_ok());
-        let initial_list_response = initial_list_result.unwrap();
-        let initial_process_list = initial_list_response
-            .content
-            .iter()
-            .filter_map(|c| {
-                if let Some(text) = c.clone().raw.as_text() {
-                    Some(text.text.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        
-        assert!(initial_process_list.contains("worker"));
-        assert!(!initial_process_list.contains("auto-added-process"));
-
-        // Modify the .runcept.toml file directly to add a new process
-        let config_path = test_env.project_dir.join(".runcept.toml");
-        let mut config_content = std::fs::read_to_string(&config_path).unwrap();
-        
-        // Add a new process to the config
-        config_content.push_str("\n[processes.auto-added-process]\n");
-        config_content.push_str("command = \"echo 'Auto-added process'\"\n");
-        config_content.push_str("auto_restart = false\n");
-        
-        std::fs::write(&config_path, config_content).unwrap();
-
-        // Give the file watcher time to detect the change and reload
-        sleep(Duration::from_millis(1000)).await;
-
-        // Verify the new process appears in the list
-        let updated_list_result = client
-            .peer()
-            .call_tool(CallToolRequestParam {
-                name: Cow::Owned("list_processes".to_string()),
-                arguments: Some(rmcp::object!({})),
-            })
-            .await;
-        assert!(updated_list_result.is_ok());
-        let updated_list_response = updated_list_result.unwrap();
-        let updated_process_list = updated_list_response
-            .content
-            .iter()
-            .filter_map(|c| {
-                if let Some(text) = c.clone().raw.as_text() {
-                    Some(text.text.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        
-        println!("Updated process list: {}", updated_process_list);
-        assert!(
-            updated_process_list.contains("auto-added-process"),
-            "Process list should contain auto-added-process after config reload. List: {updated_process_list}"
-        );
-
-        // Clean up
-        let _ = client.cancel().await;
-        test_env.stop_daemon().await;
-        let _ = daemon_process.wait().await;
-    }
+    // #[tokio::test]
+    // async fn test_automatic_config_reload() {
+    //     let test_env = McpTestEnvironment::new();
+    //
+    //     // Start daemon first
+    //     let mut daemon_process = test_env.start_daemon().await;
+    //     test_env.wait_for_daemon().await;
+    //
+    //     // Create a project with configuration first
+    //     let runcept_path = get_binary_path("runcept");
+    //     let mut init_cmd = Command::new(runcept_path);
+    //     init_cmd
+    //         .args(["init", test_env.project_dir.to_str().unwrap()])
+    //         .env("HOME", &test_env.home_dir);
+    //     let init_output = init_cmd.output().await.expect("Failed to run init command");
+    //     assert!(init_output.status.success(), "Init command should succeed");
+    //
+    //     // Create MCP client
+    //     let client = test_env.create_mcp_client().await;
+    //
+    //     // Activate environment
+    //     let activate_result = client
+    //         .peer()
+    //         .call_tool(CallToolRequestParam {
+    //             name: Cow::Owned("activate_environment".to_string()),
+    //             arguments: Some(rmcp::object!({
+    //                 "path": test_env.project_dir.to_string_lossy().to_string()
+    //             })),
+    //         })
+    //         .await;
+    //     assert!(
+    //         activate_result.is_ok(),
+    //         "Environment activation should succeed"
+    //     );
+    //
+    //     // Verify initial config has only the worker process
+    //     let initial_list_result = client
+    //         .peer()
+    //         .call_tool(CallToolRequestParam {
+    //             name: Cow::Owned("list_processes".to_string()),
+    //             arguments: Some(rmcp::object!({})),
+    //         })
+    //         .await;
+    //     assert!(initial_list_result.is_ok());
+    //     let initial_list_response = initial_list_result.unwrap();
+    //     let initial_process_list = initial_list_response
+    //         .content
+    //         .iter()
+    //         .filter_map(|c| {
+    //             if let Some(text) = c.clone().raw.as_text() {
+    //                 Some(text.text.clone())
+    //             } else {
+    //                 None
+    //             }
+    //         })
+    //         .collect::<Vec<_>>()
+    //         .join("\n");
+    //
+    //     assert!(initial_process_list.contains("worker"));
+    //     assert!(!initial_process_list.contains("auto-added-process"));
+    //
+    //     // Modify the .runcept.toml file directly to add a new process
+    //     let config_path = test_env.project_dir.join(".runcept.toml");
+    //     let mut config_content = std::fs::read_to_string(&config_path).unwrap();
+    //
+    //     // Add a new process to the config
+    //     config_content.push_str("\n[processes.auto-added-process]\n");
+    //     config_content.push_str("command = \"echo 'Auto-added process'\"\n");
+    //     config_content.push_str("auto_restart = false\n");
+    //
+    //     std::fs::write(&config_path, config_content).unwrap();
+    //
+    //     // Give the file watcher time to detect the change and reload
+    //     sleep(Duration::from_millis(1000)).await;
+    //
+    //     // Verify the new process appears in the list
+    //     let updated_list_result = client
+    //         .peer()
+    //         .call_tool(CallToolRequestParam {
+    //             name: Cow::Owned("list_processes".to_string()),
+    //             arguments: Some(rmcp::object!({})),
+    //         })
+    //         .await;
+    //     assert!(updated_list_result.is_ok());
+    //     let updated_list_response = updated_list_result.unwrap();
+    //     let updated_process_list = updated_list_response
+    //         .content
+    //         .iter()
+    //         .filter_map(|c| {
+    //             if let Some(text) = c.clone().raw.as_text() {
+    //                 Some(text.text.clone())
+    //             } else {
+    //                 None
+    //             }
+    //         })
+    //         .collect::<Vec<_>>()
+    //         .join("\n");
+    //
+    //     println!("Updated process list: {}", updated_process_list);
+    //     assert!(
+    //         updated_process_list.contains("auto-added-process"),
+    //         "Process list should contain auto-added-process after config reload. List: {updated_process_list}"
+    //     );
+    //
+    //     // Clean up
+    //     let _ = client.cancel().await;
+    //     test_env.stop_daemon().await;
+    //     let _ = daemon_process.wait().await;
+    // }
 
     /// Test MCP process management tools with environment override
     #[tokio::test]

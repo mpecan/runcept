@@ -312,7 +312,10 @@ mod tests {
     }
 }
 
-use crate::config::{GlobalConfig, ProjectConfig, find_project_config};
+use crate::config::{
+    ConfigWatcher, ConfigWatcherChannels, GlobalConfig, ProjectConfig, WatchRequest,
+    find_project_config,
+};
 use crate::database::QueryManager;
 use crate::error::{Result, RunceptError};
 use chrono::{DateTime, Utc};
@@ -478,6 +481,7 @@ pub struct EnvironmentManager {
     pub environments: HashMap<String, Environment>,
     pub global_config: GlobalConfig,
     pub database_pool: Option<Pool<Sqlite>>,
+    pub config_watcher_channels: Option<ConfigWatcherChannels>,
 }
 
 impl EnvironmentManager {
@@ -489,10 +493,14 @@ impl EnvironmentManager {
         global_config: GlobalConfig,
         database_pool: Option<Pool<Sqlite>>,
     ) -> Result<Self> {
+        // Create config watcher
+        let config_watcher_channels = ConfigWatcher::new();
+
         let mut manager = Self {
             environments: HashMap::new(),
             global_config,
             database_pool,
+            config_watcher_channels: Some(config_watcher_channels),
         };
 
         // Load environments from database if available
@@ -501,6 +509,121 @@ impl EnvironmentManager {
         }
 
         Ok(manager)
+    }
+
+    /// Start the config change event loop
+    pub fn start_config_event_loop(env_manager: std::sync::Arc<tokio::sync::RwLock<Self>>) {
+        tokio::spawn(async move {
+            let mut receiver = {
+                let mut manager = env_manager.write().await;
+                if let Some(channels) = manager.config_watcher_channels.take() {
+                    Some(channels.event_receiver)
+                } else {
+                    None
+                }
+            };
+
+            if let Some(mut receiver) = receiver {
+                tracing::info!("Config change event loop started");
+                while let Some(config_event) = receiver.recv().await {
+                    tracing::info!("Received config change event: {:?}", config_event);
+
+                    match config_event.change_type {
+                        crate::config::watcher::ConfigChangeType::Modified
+                        | crate::config::watcher::ConfigChangeType::Created => {
+                            let mut manager = env_manager.write().await;
+                            if let Err(e) = manager
+                                .reload_environment_config(&config_event.context)
+                                .await
+                            {
+                                tracing::error!(
+                                    "Failed to reload config for environment {}: {}",
+                                    config_event.context,
+                                    e
+                                );
+                            } else {
+                                tracing::info!(
+                                    "Successfully reloaded config for environment {}",
+                                    config_event.context
+                                );
+                            }
+                        }
+                        crate::config::watcher::ConfigChangeType::Deleted => {
+                            tracing::warn!(
+                                "Config file deleted for environment {}",
+                                config_event.context
+                            );
+                            // Could potentially deactivate the environment here
+                        }
+                    }
+                }
+                tracing::info!("Config change event loop ended");
+            }
+        });
+    }
+
+    /// Register a config file for watching
+    pub async fn watch_config_file(
+        &self,
+        config_path: &std::path::Path,
+        env_id: &str,
+    ) -> Result<()> {
+        if let Some(ref channels) = self.config_watcher_channels {
+            let watch_request = WatchRequest::Watch {
+                file_path: config_path.to_path_buf(),
+                context: env_id.to_string(),
+            };
+
+            channels
+                .watch_sender
+                .send(watch_request)
+                .await
+                .map_err(|e| {
+                    RunceptError::ConfigError(format!("Failed to send watch request: {}", e))
+                })?;
+        }
+
+        Ok(())
+    }
+
+    /// Unregister a config file from watching
+    pub async fn unwatch_config_file(&self, config_path: &std::path::Path) -> Result<()> {
+        if let Some(ref channels) = self.config_watcher_channels {
+            let watch_request = WatchRequest::Unwatch {
+                file_path: config_path.to_path_buf(),
+            };
+
+            channels
+                .watch_sender
+                .send(watch_request)
+                .await
+                .map_err(|e| {
+                    RunceptError::ConfigError(format!("Failed to send unwatch request: {}", e))
+                })?;
+        }
+
+        Ok(())
+    }
+
+    /// Activate an environment at the given path (combines register + activate + watch)
+    pub async fn activate_environment_at_path(&mut self, project_path: &Path) -> Result<String> {
+        // Register the project to create environment
+        let env_id = self.register_project(project_path).await?;
+
+        // Activate the environment
+        self.activate_environment(&env_id).await?;
+
+        // Start watching the config file for this environment
+        let config_path = project_path.join(".runcept.toml");
+        if let Err(e) = self.watch_config_file(&config_path, &env_id).await {
+            tracing::warn!(
+                "Failed to watch config file {}: {}",
+                config_path.display(),
+                e
+            );
+        }
+
+        Ok(env_id)
     }
 
     pub async fn register_project(&mut self, project_path: &Path) -> Result<String> {
@@ -584,6 +707,24 @@ impl EnvironmentManager {
         }
 
         Ok(())
+    }
+
+    /// Deactivate an environment and stop watching its config file
+    pub async fn deactivate_environment_and_unwatch(&mut self, env_id: &str) -> Result<()> {
+        // Stop watching config file before deactivating
+        if let Some(env) = self.get_environment(env_id) {
+            let config_path = env.project_path.join(".runcept.toml");
+            if let Err(e) = self.unwatch_config_file(&config_path).await {
+                tracing::warn!(
+                    "Failed to unwatch config file {}: {}",
+                    config_path.display(),
+                    e
+                );
+            }
+        }
+
+        // Deactivate the environment
+        self.deactivate_environment(env_id).await
     }
 
     pub async fn deactivate_environment(&mut self, env_id: &str) -> Result<()> {
