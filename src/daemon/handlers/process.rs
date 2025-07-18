@@ -266,7 +266,9 @@ impl ProcessHandles {
         environment_id: &str,
     ) -> Result<Vec<ProcessInfo>> {
         let process_manager = self.process_manager.read().await;
-        process_manager.get_processes_for_environment(environment_id).await
+        process_manager
+            .get_processes_for_environment(environment_id)
+            .await
     }
 
     /// Get process summary for an environment (processes, total count, running count)
@@ -275,7 +277,9 @@ impl ProcessHandles {
         environment_id: &str,
     ) -> Result<(Vec<ProcessInfo>, usize, usize)> {
         let process_manager = self.process_manager.read().await;
-        process_manager.get_environment_process_summary(environment_id).await
+        process_manager
+            .get_environment_process_summary(environment_id)
+            .await
     }
 
     /// Environment resolution logic - use provided environment or current active environment

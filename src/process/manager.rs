@@ -1,9 +1,9 @@
 use crate::cli::commands::ProcessInfo;
 use crate::config::ProcessDefinition;
 use crate::error::{Result, RunceptError};
+use crate::process::LogEntry;
 use crate::process::configuration::ProcessConfigurationManager;
 use crate::process::runtime::ProcessRuntimeManager;
-use crate::process::LogEntry;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -179,12 +179,13 @@ impl ProcessManager {
                 env.project_config.processes.clone()
             } else {
                 return Err(RunceptError::EnvironmentError(format!(
-                    "Environment '{}' not found", environment_id
+                    "Environment '{}' not found",
+                    environment_id
                 )));
             }
         } else {
             return Err(RunceptError::EnvironmentError(
-                "No environment manager available".to_string()
+                "No environment manager available".to_string(),
             ));
         };
 
@@ -195,10 +196,11 @@ impl ProcessManager {
             .unwrap_or_else(|_| Vec::new());
 
         // Create a map of running processes for quick lookup
-        let running_processes_map: std::collections::HashMap<String, &ProcessInfo> = running_processes
-            .iter()
-            .map(|process| (process.name.clone(), process))
-            .collect();
+        let running_processes_map: std::collections::HashMap<String, &ProcessInfo> =
+            running_processes
+                .iter()
+                .map(|process| (process.name.clone(), process))
+                .collect();
 
         // Build process list from configured processes, showing their current status
         let processes: Vec<ProcessInfo> = configured_processes
@@ -302,15 +304,12 @@ impl ProcessManager {
             .await
     }
 
-
     /// Stop all processes in the current environment (legacy compatibility)
     pub async fn stop_all_processes(&mut self) -> Result<()> {
         let environment_id = self.resolve_environment_id(None).await?;
         let mut runtime_manager = self.runtime_manager.write().await;
         runtime_manager.stop_all_processes(&environment_id).await
     }
-
-
 
     /// Get process logs by ID (legacy compatibility)
     pub async fn get_process_logs(

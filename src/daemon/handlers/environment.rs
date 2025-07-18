@@ -126,7 +126,8 @@ impl EnvironmentHandles {
         };
 
         // Delegate to ProcessHandles for process information
-        let (processes, total_configured, running_processes) = if let Some(env_id) = &current_env_id {
+        let (processes, total_configured, running_processes) = if let Some(env_id) = &current_env_id
+        {
             self.process_handles
                 .get_environment_process_summary(env_id)
                 .await
@@ -196,5 +197,4 @@ impl EnvironmentHandles {
             }),
         }
     }
-
 }

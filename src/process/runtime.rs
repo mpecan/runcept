@@ -52,24 +52,21 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        // Get process definition from configuration manager
-        let process_def = {
+        // Get process definition and working directory from configuration manager
+        let (process_def, working_dir) = {
             let config_manager = self.process_configuration_manager.read().await;
-            config_manager.get_process_definition(name, environment_id).await?
-        };
-
-        // Get working directory from configuration manager
-        let working_dir = {
-            let config_manager = self.process_configuration_manager.read().await;
-            config_manager.get_working_directory(environment_id).await?
+            let process_def = config_manager
+                .get_process_definition(name, environment_id)
+                .await?;
+            let working_dir = config_manager.get_working_directory(environment_id).await?;
+            (process_def, working_dir)
         };
 
         // Check if process is already running
         if let Some(env_processes) = self.processes.get(environment_id) {
             if env_processes.contains_key(name) {
                 return Err(RunceptError::ProcessError(format!(
-                    "Process '{}' is already running in environment '{}'",
-                    name, environment_id
+                    "Process '{name}' is already running in environment '{environment_id}'"
                 )));
             }
         }
@@ -93,20 +90,21 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        // Get environment processes
-        let env_processes = self.processes.get_mut(environment_id).ok_or_else(|| {
-            RunceptError::ProcessError(format!(
-                "No processes found in environment '{}'",
-                environment_id
-            ))
-        })?;
-
-        let process = env_processes.get_mut(name).ok_or_else(|| {
-            RunceptError::ProcessError(format!(
-                "Process '{}' not found in environment '{}'",
-                name, environment_id
-            ))
-        })?;
+        // Get environment processes and the specific process
+        let process = self
+            .processes
+            .get_mut(environment_id)
+            .ok_or_else(|| {
+                RunceptError::ProcessError(format!(
+                    "No processes found in environment '{environment_id}'"
+                ))
+            })?
+            .get_mut(name)
+            .ok_or_else(|| {
+                RunceptError::ProcessError(format!(
+                    "Process '{name}' not found in environment '{environment_id}'"
+                ))
+            })?;
 
         if !process.is_running() {
             return Ok(()); // Already stopped
@@ -142,12 +140,7 @@ impl ProcessRuntimeManager {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Remove the old process from tracking
-        if let Some(env_processes) = self.processes.get_mut(environment_id) {
-            env_processes.remove(name);
-        }
-        if let Some(env_handles) = self.process_handles.get_mut(environment_id) {
-            env_handles.remove(name);
-        }
+        self.remove_process_from_tracking(name, environment_id);
 
         // Start the process again
         self.start_process(name, environment_id).await?;
@@ -179,7 +172,7 @@ impl ProcessRuntimeManager {
                         environment: environment_id.to_string(),
                         health_status: None, // TODO: Implement health status tracking
                         restart_count: 0,    // TODO: Implement restart count tracking
-                        last_activity: process.last_activity.map(|t| format!("{:?}", t)),
+                        last_activity: process.last_activity.map(|t| format!("{t:?}")),
                     }
                 })
                 .collect()
@@ -258,12 +251,7 @@ impl ProcessRuntimeManager {
                 .collect();
 
             for name in finished_names {
-                if let Some(env_processes) = self.processes.get_mut(environment_id) {
-                    env_processes.remove(&name);
-                }
-                if let Some(env_handles) = self.process_handles.get_mut(environment_id) {
-                    env_handles.remove(&name);
-                }
+                self.remove_process_from_tracking(&name, environment_id);
                 finished_processes.push(name);
             }
         }
@@ -402,7 +390,7 @@ impl ProcessRuntimeManager {
         let process_id = process.id.clone();
 
         // Set up shutdown channel
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
 
         // Store process handle with Arc<Mutex<>> for shared access
         let child_handle = Arc::new(Mutex::new(Some(child)));
@@ -416,10 +404,10 @@ impl ProcessRuntimeManager {
         // Initialize environment maps if they don't exist
         self.process_handles
             .entry(environment_id.to_string())
-            .or_insert_with(HashMap::new);
+            .or_default();
         self.processes
             .entry(environment_id.to_string())
-            .or_insert_with(HashMap::new);
+            .or_default();
 
         // Store process and handle
         self.process_handles
@@ -432,80 +420,11 @@ impl ProcessRuntimeManager {
             .insert(process_name.clone(), process);
 
         // Spawn logging and monitoring tasks
-        let stdout_logger = Arc::clone(&logger_handle);
-        let stderr_logger = Arc::clone(&logger_handle);
-
-        // Spawn stdout capture task
-        tokio::spawn(async move {
-            use tokio::io::AsyncBufReadExt;
-            let mut reader = BufReader::new(stdout);
-            let mut line = String::new();
-            
-            while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 {
-                    break; // EOF
-                }
-                
-                let trimmed = line.trim_end();
-                if !trimmed.is_empty() {
-                    let mut logger = stdout_logger.lock().await;
-                    let _ = logger.log_stdout(trimmed).await;
-                }
-                line.clear();
-            }
-        });
-
-        // Spawn stderr capture task
-        tokio::spawn(async move {
-            use tokio::io::AsyncBufReadExt;
-            let mut reader = BufReader::new(stderr);
-            let mut line = String::new();
-            
-            while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 {
-                    break; // EOF
-                }
-                
-                let trimmed = line.trim_end();
-                if !trimmed.is_empty() {
-                    let mut logger = stderr_logger.lock().await;
-                    let _ = logger.log_stderr(trimmed).await;
-                }
-                line.clear();
-            }
-        });
+        Self::spawn_output_logging_task(stdout, Arc::clone(&logger_handle), true);
+        Self::spawn_output_logging_task(stderr, Arc::clone(&logger_handle), false);
 
         // Spawn process monitoring task
-        let child_monitor = Arc::clone(&child_handle);
-        let process_name_monitor = process_name.clone();
-        
-        tokio::spawn(async move {
-            // Wait for the process to complete
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                let mut child_guard = child_monitor.lock().await;
-                if let Some(child) = child_guard.as_mut() {
-                    match child.try_wait() {
-                        Ok(Some(exit_status)) => {
-                            info!("Process {} exited with status: {}", process_name_monitor, exit_status);
-                            child_guard.take();
-                            break;
-                        }
-                        Ok(None) => {
-                            // Process still running
-                        }
-                        Err(e) => {
-                            error!("Error checking process status for {}: {}", process_name_monitor, e);
-                            child_guard.take();
-                            break;
-                        }
-                    }
-                } else {
-                    // Child already exited
-                    break;
-                }
-            }
-        });
+        Self::spawn_process_monitoring_task(Arc::clone(&child_handle), process_name.clone());
 
         Ok(process_id)
     }
@@ -555,5 +474,70 @@ impl ProcessRuntimeManager {
         }
 
         Ok(())
+    }
+
+    /// Helper method to remove a process from both tracking collections
+    fn remove_process_from_tracking(&mut self, name: &str, environment_id: &str) {
+        if let Some(env_processes) = self.processes.get_mut(environment_id) {
+            env_processes.remove(name);
+        }
+        if let Some(env_handles) = self.process_handles.get_mut(environment_id) {
+            env_handles.remove(name);
+        }
+    }
+
+    /// Spawn a task to capture and log output from a process stream
+    fn spawn_output_logging_task<T>(stream: T, logger: Arc<Mutex<ProcessLogger>>, is_stdout: bool)
+    where
+        T: tokio::io::AsyncRead + Send + Unpin + 'static,
+    {
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+
+            while let Ok(n) = reader.read_line(&mut line).await {
+                if n == 0 {
+                    break; // EOF
+                }
+
+                let trimmed = line.trim_end();
+                if !trimmed.is_empty() {
+                    let mut logger = logger.lock().await;
+                    let result = if is_stdout {
+                        logger.log_stdout(trimmed).await
+                    } else {
+                        logger.log_stderr(trimmed).await
+                    };
+                    let _ = result;
+                }
+                line.clear();
+            }
+        });
+    }
+
+    /// Spawn a task to monitor process completion without polling
+    fn spawn_process_monitoring_task(
+        child_handle: Arc<Mutex<Option<Child>>>,
+        process_name: String,
+    ) {
+        tokio::spawn(async move {
+            let mut child_guard = child_handle.lock().await;
+            if let Some(mut child) = child_guard.take() {
+                drop(child_guard); // Release the lock while waiting
+
+                // Wait for the process to complete using wait() instead of polling
+                match child.wait().await {
+                    Ok(exit_status) => {
+                        info!(
+                            "Process {} exited with status: {}",
+                            process_name, exit_status
+                        );
+                    }
+                    Err(e) => {
+                        error!("Error waiting for process {}: {}", process_name, e);
+                    }
+                }
+            }
+        });
     }
 }
