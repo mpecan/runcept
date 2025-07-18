@@ -35,7 +35,7 @@ impl ProcessConfigurationManager {
         );
 
         let environment = self.get_active_environment(environment_id).await?;
-        
+
         let process_def = environment
             .project_config
             .processes
@@ -59,9 +59,12 @@ impl ProcessConfigurationManager {
         let process_name = process_def.name.clone();
         self.modify_config(environment_id, |config| {
             Self::validate_process_operation(config, &process_name, ProcessOperation::Add)?;
-            config.processes.insert(process_name.clone(), process_def.clone());
+            config
+                .processes
+                .insert(process_name.clone(), process_def.clone());
             Ok(())
-        }).await?;
+        })
+        .await?;
 
         info!(
             "Successfully added process '{}' to environment '{}'",
@@ -81,7 +84,8 @@ impl ProcessConfigurationManager {
             Self::validate_process_operation(config, name, ProcessOperation::Remove)?;
             config.processes.remove(name);
             Ok(())
-        }).await?;
+        })
+        .await?;
 
         info!(
             "Successfully removed process '{}' from environment '{}'",
@@ -109,7 +113,8 @@ impl ProcessConfigurationManager {
             updated_process.name = name.to_string();
             config.processes.insert(name.to_string(), updated_process);
             Ok(())
-        }).await?;
+        })
+        .await?;
 
         info!(
             "Successfully updated process '{}' in environment '{}'",
@@ -129,7 +134,7 @@ impl ProcessConfigurationManager {
         );
 
         let environment = self.get_active_environment(environment_id).await?;
-        
+
         let processes: Vec<ProcessDefinition> = environment
             .project_config
             .processes
@@ -168,9 +173,9 @@ impl ProcessConfigurationManager {
 
         // Note: This method doesn't require active environment check for working directory access
         let env_manager = self.environment_manager.read().await;
-        let environment = env_manager.get_environment(environment_id).ok_or_else(|| {
-            Self::environment_not_found_error(environment_id)
-        })?;
+        let environment = env_manager
+            .get_environment(environment_id)
+            .ok_or_else(|| Self::environment_not_found_error(environment_id))?;
 
         Ok(environment.project_path.clone())
     }
@@ -178,9 +183,9 @@ impl ProcessConfigurationManager {
     /// Validate that an environment exists and is active
     async fn validate_environment(&self, environment_id: &str) -> Result<()> {
         let env_manager = self.environment_manager.read().await;
-        let environment = env_manager.get_environment(environment_id).ok_or_else(|| {
-            Self::environment_not_found_error(environment_id)
-        })?;
+        let environment = env_manager
+            .get_environment(environment_id)
+            .ok_or_else(|| Self::environment_not_found_error(environment_id))?;
 
         if !environment.is_active() {
             return Err(Self::environment_not_active_error(environment_id));
@@ -196,11 +201,14 @@ impl ProcessConfigurationManager {
     }
 
     /// Get an active environment (helper method to reduce duplication)
-    async fn get_active_environment(&self, environment_id: &str) -> Result<crate::config::Environment> {
+    async fn get_active_environment(
+        &self,
+        environment_id: &str,
+    ) -> Result<crate::config::Environment> {
         let env_manager = self.environment_manager.read().await;
-        let environment = env_manager.get_environment(environment_id).ok_or_else(|| {
-            Self::environment_not_found_error(environment_id)
-        })?;
+        let environment = env_manager
+            .get_environment(environment_id)
+            .ok_or_else(|| Self::environment_not_found_error(environment_id))?;
 
         if !environment.is_active() {
             return Err(Self::environment_not_active_error(environment_id));

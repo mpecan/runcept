@@ -38,13 +38,15 @@ mod tests {
             socket: None,
             command: Commands::Start {
                 name: "web-server".to_string(),
+                environment: None,
             },
         };
 
         let request = CliHandler::command_to_request(&args.command).unwrap();
         match request {
-            DaemonRequest::StartProcess { name } => {
+            DaemonRequest::StartProcess { name, environment } => {
                 assert_eq!(name, "web-server");
+                assert_eq!(environment, None);
             }
             _ => panic!("Expected StartProcess request"),
         }
@@ -202,15 +204,30 @@ impl CliHandler {
             }
 
             // Process commands
-            Commands::Start { name } => Some(DaemonRequest::StartProcess { name: name.clone() }),
-            Commands::Stop { name } => Some(DaemonRequest::StopProcess { name: name.clone() }),
-            Commands::Restart { name } => {
-                Some(DaemonRequest::RestartProcess { name: name.clone() })
-            }
-            Commands::List => Some(DaemonRequest::ListProcesses),
-            Commands::Logs { name, lines, .. } => Some(DaemonRequest::GetProcessLogs {
+            Commands::Start { name, environment } => Some(DaemonRequest::StartProcess {
+                name: name.clone(),
+                environment: environment.clone(),
+            }),
+            Commands::Stop { name, environment } => Some(DaemonRequest::StopProcess {
+                name: name.clone(),
+                environment: environment.clone(),
+            }),
+            Commands::Restart { name, environment } => Some(DaemonRequest::RestartProcess {
+                name: name.clone(),
+                environment: environment.clone(),
+            }),
+            Commands::List { environment } => Some(DaemonRequest::ListProcesses {
+                environment: environment.clone(),
+            }),
+            Commands::Logs {
+                name,
+                lines,
+                environment,
+                ..
+            } => Some(DaemonRequest::GetProcessLogs {
                 name: name.clone(),
                 lines: *lines,
+                environment: environment.clone(),
             }),
 
             // Global commands

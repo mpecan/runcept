@@ -23,12 +23,16 @@ mod tests {
     fn test_request_serialization() {
         let request = DaemonRequest::StartProcess {
             name: "test".to_string(),
+            environment: None,
         };
         let serialized = serde_json::to_string(&request).unwrap();
         let deserialized: DaemonRequest = serde_json::from_str(&serialized).unwrap();
 
         match deserialized {
-            DaemonRequest::StartProcess { name } => assert_eq!(name, "test"),
+            DaemonRequest::StartProcess { name, environment } => {
+                assert_eq!(name, "test");
+                assert_eq!(environment, None);
+            }
             _ => panic!("Unexpected request type"),
         }
     }
@@ -205,24 +209,74 @@ impl DaemonClient {
 
     /// Start a process
     pub async fn start_process(&self, name: String) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::StartProcess { name })
+        self.send_request(DaemonRequest::StartProcess {
+            name,
+            environment: None,
+        })
+        .await
+    }
+
+    /// Start a process with environment override
+    pub async fn start_process_with_env(
+        &self,
+        name: String,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        self.send_request(DaemonRequest::StartProcess { name, environment })
             .await
     }
 
     /// Stop a process
     pub async fn stop_process(&self, name: String) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::StopProcess { name }).await
+        self.send_request(DaemonRequest::StopProcess {
+            name,
+            environment: None,
+        })
+        .await
+    }
+
+    /// Stop a process with environment override
+    pub async fn stop_process_with_env(
+        &self,
+        name: String,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        self.send_request(DaemonRequest::StopProcess { name, environment })
+            .await
     }
 
     /// Restart a process
     pub async fn restart_process(&self, name: String) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::RestartProcess { name })
+        self.send_request(DaemonRequest::RestartProcess {
+            name,
+            environment: None,
+        })
+        .await
+    }
+
+    /// Restart a process with environment override
+    pub async fn restart_process_with_env(
+        &self,
+        name: String,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        self.send_request(DaemonRequest::RestartProcess { name, environment })
             .await
     }
 
     /// List processes in current environment
     pub async fn list_processes(&self) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::ListProcesses).await
+        self.send_request(DaemonRequest::ListProcesses { environment: None })
+            .await
+    }
+
+    /// List processes with environment override
+    pub async fn list_processes_with_env(
+        &self,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        self.send_request(DaemonRequest::ListProcesses { environment })
+            .await
     }
 
     /// Get process logs
@@ -231,8 +285,27 @@ impl DaemonClient {
         name: String,
         lines: Option<usize>,
     ) -> Result<DaemonResponse> {
-        self.send_request(DaemonRequest::GetProcessLogs { name, lines })
-            .await
+        self.send_request(DaemonRequest::GetProcessLogs {
+            name,
+            lines,
+            environment: None,
+        })
+        .await
+    }
+
+    /// Get process logs with environment override
+    pub async fn get_process_logs_with_env(
+        &self,
+        name: String,
+        lines: Option<usize>,
+        environment: Option<String>,
+    ) -> Result<DaemonResponse> {
+        self.send_request(DaemonRequest::GetProcessLogs {
+            name,
+            lines,
+            environment,
+        })
+        .await
     }
 
     /// List all processes across environments

@@ -563,7 +563,7 @@ impl HealthCheck {
 
     pub async fn execute(&self) -> Result<HealthResult> {
         let start_time = Instant::now();
-        
+
         let check_result = match self {
             HealthCheck::Http {
                 url,
@@ -572,7 +572,7 @@ impl HealthCheck {
             } => {
                 let client = reqwest::Client::new();
                 let future = client.get(url).send();
-                
+
                 match timeout(*check_timeout, future).await {
                     Ok(Ok(response)) => {
                         let actual_status = response.status().as_u16();
@@ -582,7 +582,9 @@ impl HealthCheck {
                             error_message: if is_healthy {
                                 None
                             } else {
-                                Some(format!("Expected status {expected_status}, got {actual_status}"))
+                                Some(format!(
+                                    "Expected status {expected_status}, got {actual_status}"
+                                ))
                             },
                         }
                     }
@@ -597,7 +599,7 @@ impl HealthCheck {
             } => {
                 let addr = format!("{host}:{port}");
                 let future = tokio::net::TcpStream::connect(&addr);
-                
+
                 match timeout(*check_timeout, future).await {
                     Ok(Ok(_)) => CheckResult::success(),
                     Ok(Err(e)) => CheckResult::failure(e.to_string()),
@@ -616,7 +618,7 @@ impl HealthCheck {
                 if let Some(wd) = working_dir {
                     cmd.current_dir(wd);
                 }
-                
+
                 let future = cmd.output();
                 match timeout(*check_timeout, future).await {
                     Ok(Ok(output)) => {
@@ -627,7 +629,9 @@ impl HealthCheck {
                             error_message: if is_healthy {
                                 None
                             } else {
-                                Some(format!("Expected exit code {expected_exit_code}, got {exit_code}"))
+                                Some(format!(
+                                    "Expected exit code {expected_exit_code}, got {exit_code}"
+                                ))
                             },
                         }
                     }
@@ -636,8 +640,11 @@ impl HealthCheck {
                 }
             }
         };
-        
-        Ok(HealthResult::from_check_result(check_result, start_time.elapsed()))
+
+        Ok(HealthResult::from_check_result(
+            check_result,
+            start_time.elapsed(),
+        ))
     }
 }
 
@@ -655,14 +662,14 @@ impl CheckResult {
             error_message: None,
         }
     }
-    
+
     fn failure(error: String) -> Self {
         Self {
             is_healthy: false,
             error_message: Some(error),
         }
     }
-    
+
     fn timeout(message: &str) -> Self {
         Self {
             is_healthy: false,
@@ -788,7 +795,7 @@ impl ProcessStatusTracker {
     pub fn update_status(&mut self, process_id: &str, status: ProcessStatus) {
         let entry = Self::create_status_entry(status);
         let history = self.get_or_create_history(process_id);
-        
+
         history.push(entry);
         Self::limit_history_size(history);
     }

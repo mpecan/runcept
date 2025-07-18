@@ -259,16 +259,20 @@ impl RequestProcessor {
             }
 
             // Process commands
-            DaemonRequest::StartProcess { name } => {
-                self.process_handles.start_process(name, None).await
+            DaemonRequest::StartProcess { name, environment } => {
+                self.process_handles.start_process(name, environment).await
             }
-            DaemonRequest::StopProcess { name } => {
-                self.process_handles.stop_process(name, None).await
+            DaemonRequest::StopProcess { name, environment } => {
+                self.process_handles.stop_process(name, environment).await
             }
-            DaemonRequest::RestartProcess { name } => {
-                self.process_handles.restart_process(name, None).await
+            DaemonRequest::RestartProcess { name, environment } => {
+                self.process_handles
+                    .restart_process(name, environment)
+                    .await
             }
-            DaemonRequest::ListProcesses => self.process_handles.list_processes(None).await,
+            DaemonRequest::ListProcesses { environment } => {
+                self.process_handles.list_processes(environment).await
+            }
             DaemonRequest::ListAllProcesses => self.process_handles.list_all_processes().await,
             DaemonRequest::KillAllProcesses => self.process_handles.kill_all_processes().await,
 
@@ -288,9 +292,13 @@ impl RequestProcessor {
             }
 
             // Process management commands
-            DaemonRequest::GetProcessLogs { name, lines } => {
+            DaemonRequest::GetProcessLogs {
+                name,
+                lines,
+                environment,
+            } => {
                 self.process_handles
-                    .get_process_logs(name, lines, None)
+                    .get_process_logs(name, lines, environment)
                     .await
             }
             DaemonRequest::AddProcess {

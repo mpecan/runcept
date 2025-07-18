@@ -16,8 +16,9 @@ mod tests {
         // Test process commands
         let args = CliArgs::try_parse_from(["runcept", "start", "web-server"]).unwrap();
         match args.command {
-            Commands::Start { name } => {
+            Commands::Start { name, environment } => {
                 assert_eq!(name, "web-server");
+                assert_eq!(environment, None);
             }
             _ => panic!("Expected Start command"),
         }
@@ -41,10 +42,12 @@ mod tests {
                 name,
                 follow,
                 lines,
+                environment,
             } => {
                 assert_eq!(name, "web-server");
                 assert!(follow);
                 assert_eq!(lines, Some(50));
+                assert_eq!(environment, None);
             }
             _ => panic!("Expected Logs command"),
         }
@@ -130,22 +133,35 @@ pub enum Commands {
     Start {
         /// Name of the process to start
         name: String,
+        /// Environment to start the process in (defaults to current environment)
+        #[arg(short, long)]
+        environment: Option<String>,
     },
 
     /// Stop a running process
     Stop {
         /// Name of the process to stop
         name: String,
+        /// Environment to stop the process in (defaults to current environment)
+        #[arg(short, long)]
+        environment: Option<String>,
     },
 
     /// Restart a process
     Restart {
         /// Name of the process to restart
         name: String,
+        /// Environment to restart the process in (defaults to current environment)
+        #[arg(short, long)]
+        environment: Option<String>,
     },
 
     /// List processes in current environment
-    List,
+    List {
+        /// Environment to list processes from (defaults to current environment)
+        #[arg(short, long)]
+        environment: Option<String>,
+    },
 
     /// View process logs
     Logs {
@@ -157,6 +173,9 @@ pub enum Commands {
         /// Number of lines to show from the end
         #[arg(short = 'n', long)]
         lines: Option<usize>,
+        /// Environment to get logs from (defaults to current environment)
+        #[arg(short, long)]
+        environment: Option<String>,
     },
 
     /// Global commands
@@ -211,17 +230,23 @@ pub enum DaemonRequest {
     // Process commands
     StartProcess {
         name: String,
+        environment: Option<String>, // Optional environment override
     },
     StopProcess {
         name: String,
+        environment: Option<String>, // Optional environment override
     },
     RestartProcess {
         name: String,
+        environment: Option<String>, // Optional environment override
     },
-    ListProcesses,
+    ListProcesses {
+        environment: Option<String>, // Optional environment override
+    },
     GetProcessLogs {
         name: String,
         lines: Option<usize>,
+        environment: Option<String>, // Optional environment override
     },
 
     // Global commands

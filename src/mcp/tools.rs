@@ -432,7 +432,10 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
-        let request = DaemonRequest::StartProcess { name };
+        let request = DaemonRequest::StartProcess {
+            name,
+            environment: None,
+        };
         let response = send_daemon_request(request).await?;
 
         let result_text = format_daemon_response(response);
@@ -450,7 +453,10 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
-        let request = DaemonRequest::StopProcess { name };
+        let request = DaemonRequest::StopProcess {
+            name,
+            environment: None,
+        };
         let response = send_daemon_request(request).await?;
 
         let result_text = format_daemon_response(response);
@@ -468,7 +474,10 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
-        let request = DaemonRequest::RestartProcess { name };
+        let request = DaemonRequest::RestartProcess {
+            name,
+            environment: None,
+        };
         let response = send_daemon_request(request).await?;
 
         let result_text = format_daemon_response(response);
@@ -483,7 +492,7 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
-        let request = DaemonRequest::ListProcesses;
+        let request = DaemonRequest::ListProcesses { environment: None };
         let response = send_daemon_request(request).await?;
 
         let result_text = format_daemon_response(response);
@@ -501,7 +510,11 @@ impl RunceptTools {
         // Record activity for the current environment
         let _ = self.record_current_environment_activity().await;
 
-        let request = DaemonRequest::GetProcessLogs { name, lines };
+        let request = DaemonRequest::GetProcessLogs {
+            name,
+            lines,
+            environment: None,
+        };
         let response = send_daemon_request(request).await?;
 
         let result_text = format_daemon_response(response);

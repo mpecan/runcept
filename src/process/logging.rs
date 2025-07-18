@@ -54,7 +54,7 @@ impl ProcessLogger {
     /// Create a new process logger
     pub async fn new(process_name: String, project_path: PathBuf) -> Result<Self> {
         let log_file_path = Self::build_log_file_path(&process_name, &project_path);
-        
+
         // Ensure logs directory exists
         Self::ensure_logs_directory(&project_path).await?;
 
@@ -156,7 +156,7 @@ impl ProcessLogger {
     fn parse_legacy_log_line(line: &str) -> Option<LogEntry> {
         // Expected format: "2025-07-15 07:31:44.540 [LEVEL] message"
         let components = Self::extract_legacy_log_components(line)?;
-        
+
         let timestamp = Self::parse_legacy_timestamp(&components.timestamp)?;
         let level = Self::parse_legacy_level(&components.level)?;
 
