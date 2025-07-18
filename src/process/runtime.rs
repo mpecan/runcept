@@ -515,6 +515,13 @@ impl ProcessRuntimeManager {
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
+        // Create a new process group so we can kill the entire process tree
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0); // Create new process group
+        }
+
         // Add environment variables
         for (key, value) in &process.env_vars {
             cmd.env(key, value);
@@ -751,7 +758,7 @@ impl ProcessRuntimeManager {
         }
     }
 
-    /// Kill a process by PID using system calls
+    /// Kill a process and all its children by killing the entire process group
     async fn kill_process_by_pid(&self, pid: u32) -> Result<()> {
         #[cfg(unix)]
         {
@@ -768,41 +775,81 @@ impl ProcessRuntimeManager {
                 _ => return Err(RunceptError::ProcessError(format!("Invalid PID: {}", pid))),
             };
             
-            // First try SIGTERM (graceful shutdown)
-            match kill(nix_pid, Signal::SIGTERM) {
+            // Kill the entire process group to ensure child processes are also terminated
+            // Use negative PID to kill the process group
+            let process_group_pid = Pid::from_raw(-(pid as i32));
+            
+            // First try SIGTERM (graceful shutdown) to the entire process group
+            match kill(process_group_pid, Signal::SIGTERM) {
                 Ok(_) => {
-                    info!("Sent SIGTERM to process {}", pid);
+                    info!("Sent SIGTERM to process group {}", pid);
                     
                     // Wait a bit for graceful shutdown
                     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
                     
-                    // Check if process is still alive
+                    // Check if the main process is still alive
                     if Self::is_process_alive(pid) {
-                        warn!("Process {} did not exit gracefully, sending SIGKILL", pid);
+                        warn!("Process group {} did not exit gracefully, sending SIGKILL", pid);
                         
-                        // Force kill with SIGKILL
-                        match kill(nix_pid, Signal::SIGKILL) {
+                        // Force kill the entire process group with SIGKILL
+                        match kill(process_group_pid, Signal::SIGKILL) {
                             Ok(_) => {
-                                info!("Sent SIGKILL to process {}", pid);
+                                info!("Sent SIGKILL to process group {}", pid);
                                 Ok(())
                             }
                             Err(e) => {
                                 Err(RunceptError::ProcessError(format!(
-                                    "Failed to send SIGKILL to process {}: {}",
+                                    "Failed to send SIGKILL to process group {}: {}",
                                     pid, e
                                 )))
                             }
                         }
                     } else {
-                        info!("Process {} exited gracefully after SIGTERM", pid);
+                        info!("Process group {} exited gracefully after SIGTERM", pid);
                         Ok(())
                     }
                 }
                 Err(e) => {
-                    Err(RunceptError::ProcessError(format!(
-                        "Failed to send SIGTERM to process {}: {}",
-                        pid, e
-                    )))
+                    // If process group kill fails, fallback to killing just the parent process
+                    warn!("Failed to kill process group {}, falling back to single process kill: {}", pid, e);
+                    
+                    // Fallback: kill just the parent process
+                    match kill(nix_pid, Signal::SIGTERM) {
+                        Ok(_) => {
+                            info!("Sent SIGTERM to process {} (fallback)", pid);
+                            
+                            // Wait a bit for graceful shutdown
+                            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                            
+                            // Check if process is still alive
+                            if Self::is_process_alive(pid) {
+                                warn!("Process {} did not exit gracefully, sending SIGKILL", pid);
+                                
+                                // Force kill with SIGKILL
+                                match kill(nix_pid, Signal::SIGKILL) {
+                                    Ok(_) => {
+                                        info!("Sent SIGKILL to process {}", pid);
+                                        Ok(())
+                                    }
+                                    Err(e) => {
+                                        Err(RunceptError::ProcessError(format!(
+                                            "Failed to send SIGKILL to process {}: {}",
+                                            pid, e
+                                        )))
+                                    }
+                                }
+                            } else {
+                                info!("Process {} exited gracefully after SIGTERM", pid);
+                                Ok(())
+                            }
+                        }
+                        Err(e) => {
+                            Err(RunceptError::ProcessError(format!(
+                                "Failed to send SIGTERM to process {}: {}",
+                                pid, e
+                            )))
+                        }
+                    }
                 }
             }
         }
