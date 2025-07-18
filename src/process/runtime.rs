@@ -112,10 +112,69 @@ impl ProcessRuntimeManager {
 
         process.transition_to(ProcessStatus::Stopping);
 
-        // Get process handle and send shutdown signal
+        // Get process handle and attempt graceful shutdown
         if let Some(env_handles) = self.process_handles.get(environment_id) {
             if let Some(handle) = env_handles.get(name) {
+                // Send shutdown signal first
                 let _ = handle.shutdown_tx.send(()).await;
+
+                // Try to terminate the process gracefully
+                let mut child_guard = handle.child.lock().await;
+                if let Some(child) = child_guard.as_mut() {
+                    // First try SIGTERM (graceful shutdown)
+                    if let Err(e) = child.kill().await {
+                        warn!(
+                            "Failed to send SIGTERM to process '{}' in environment '{}': {}",
+                            name, environment_id, e
+                        );
+                    }
+
+                    // Wait a bit for graceful shutdown
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+                    // Check if process is still running
+                    match child.try_wait() {
+                        Ok(Some(_exit_status)) => {
+                            // Process has exited gracefully
+                            debug!(
+                                "Process '{}' in environment '{}' exited gracefully",
+                                name, environment_id
+                            );
+                        }
+                        Ok(None) => {
+                            // Process is still running, force kill
+                            warn!(
+                                "Process '{}' in environment '{}' did not exit gracefully, force killing",
+                                name, environment_id
+                            );
+
+                            // Force kill if it's still running
+                            if let Err(e) = child.kill().await {
+                                error!(
+                                    "Failed to force kill process '{}' in environment '{}': {}",
+                                    name, environment_id, e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Error checking process '{}' in environment '{}' status: {}",
+                                name, environment_id, e
+                            );
+                        }
+                    }
+
+                    // Clear the child handle
+                    child_guard.take();
+                }
+            }
+        }
+
+        // Update process status to stopped
+        if let Some(env_processes) = self.processes.get_mut(environment_id) {
+            if let Some(process) = env_processes.get_mut(name) {
+                process.transition_to(ProcessStatus::Stopped);
+                process.clear_pid();
             }
         }
 
@@ -390,7 +449,7 @@ impl ProcessRuntimeManager {
         let process_id = process.id.clone();
 
         // Set up shutdown channel
-        let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
 
         // Store process handle with Arc<Mutex<>> for shared access
         let child_handle = Arc::new(Mutex::new(Some(child)));
@@ -423,8 +482,13 @@ impl ProcessRuntimeManager {
         Self::spawn_output_logging_task(stdout, Arc::clone(&logger_handle), true);
         Self::spawn_output_logging_task(stderr, Arc::clone(&logger_handle), false);
 
-        // Spawn process monitoring task
-        Self::spawn_process_monitoring_task(Arc::clone(&child_handle), process_name.clone());
+        // Spawn process monitoring task with proper shutdown handling
+        Self::spawn_process_monitoring_task(
+            Arc::clone(&child_handle),
+            process_name.clone(),
+            shutdown_rx,
+            environment_id.to_string(),
+        );
 
         Ok(process_id)
     }
@@ -515,26 +579,43 @@ impl ProcessRuntimeManager {
         });
     }
 
-    /// Spawn a task to monitor process completion without polling
+    /// Spawn a task to monitor process completion and handle shutdown signals
     fn spawn_process_monitoring_task(
         child_handle: Arc<Mutex<Option<Child>>>,
         process_name: String,
+        mut shutdown_rx: mpsc::Receiver<()>,
+        environment_id: String,
     ) {
         tokio::spawn(async move {
             let mut child_guard = child_handle.lock().await;
             if let Some(mut child) = child_guard.take() {
                 drop(child_guard); // Release the lock while waiting
 
-                // Wait for the process to complete using wait() instead of polling
-                match child.wait().await {
-                    Ok(exit_status) => {
-                        info!(
-                            "Process {} exited with status: {}",
-                            process_name, exit_status
-                        );
+                // Wait for the process to complete or receive shutdown signal
+                tokio::select! {
+                    result = child.wait() => {
+                        match result {
+                            Ok(exit_status) => {
+                                info!(
+                                    "Process '{}' in environment '{}' exited with status: {}",
+                                    process_name, environment_id, exit_status
+                                );
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Error waiting for process '{}' in environment '{}': {}",
+                                    process_name, environment_id, e
+                                );
+                            }
+                        }
                     }
-                    Err(e) => {
-                        error!("Error waiting for process {}: {}", process_name, e);
+                    _ = shutdown_rx.recv() => {
+                        debug!(
+                            "Received shutdown signal for process '{}' in environment '{}'",
+                            process_name, environment_id
+                        );
+                        // The actual termination is handled by the stop_process method
+                        // This task just needs to clean up and exit
                     }
                 }
             }

@@ -414,6 +414,154 @@ auto_restart = true
     }
 
     #[test]
+    fn test_process_stop_functionality() {
+        let test_env = TestEnvironment::new();
+        test_env.setup_test_project();
+
+        let mut daemon_process = test_env.start_daemon();
+        test_env.wait_for_daemon();
+
+        // Activate environment
+        test_env
+            .runcept_cmd()
+            .args(["activate", test_env.project_dir.to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Start a Python web server (long-running process)
+        test_env
+            .runcept_cmd_in_project()
+            .args(["start", "web"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("started").or(predicate::str::contains("Starting")));
+
+        // Wait for process to be fully started
+        std::thread::sleep(Duration::from_millis(1000));
+
+        // Verify process is running by checking process list
+        test_env
+            .runcept_cmd_in_project()
+            .arg("list")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("web"))
+            .stdout(predicate::str::contains("running").or(predicate::str::contains("started")));
+
+        // Try to connect to the web server to verify it's actually running
+        let server_url = "http://127.0.0.1:8080";
+        let mut server_responding = false;
+
+        // Give the server up to 5 seconds to start responding
+        for _ in 0..50 {
+            if let Ok(response) = std::process::Command::new("curl")
+                .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", server_url])
+                .output()
+            {
+                if let Ok(status_code) = String::from_utf8(response.stdout) {
+                    if status_code.trim() == "200" {
+                        server_responding = true;
+                        break;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // If curl is not available, skip the HTTP check but continue with the process test
+        if !server_responding {
+            eprintln!(
+                "Warning: Could not verify HTTP server is responding (curl may not be available)"
+            );
+        }
+
+        // Stop the web server process
+        test_env
+            .runcept_cmd_in_project()
+            .args(["stop", "web"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("stopped").or(predicate::str::contains("Stopping")));
+
+        // Wait for process to be fully stopped and check multiple times
+        let mut attempts = 0;
+        let max_attempts = 10;
+        let mut final_status = String::new();
+
+        while attempts < max_attempts {
+            std::thread::sleep(Duration::from_millis(1000));
+
+            let output = test_env
+                .runcept_cmd_in_project()
+                .arg("list")
+                .output()
+                .expect("Failed to run list command");
+
+            final_status = String::from_utf8_lossy(&output.stdout).to_string();
+
+            // Check if process is stopped/exited
+            if final_status.contains("stopped") || final_status.contains("exited") {
+                break;
+            }
+
+            attempts += 1;
+            eprintln!(
+                "Attempt {}: Process status is still: {}",
+                attempts,
+                final_status
+                    .lines()
+                    .find(|line| line.contains("web"))
+                    .unwrap_or("not found")
+            );
+        }
+
+        // Print final status for debugging
+        eprintln!("Final status after {} attempts:", attempts);
+        eprintln!("{}", final_status);
+
+        // Verify process is no longer running
+        assert!(
+            final_status.contains("stopped") || final_status.contains("exited"),
+            "Process should be stopped or exited after {} attempts. Final status: {}",
+            attempts,
+            final_status
+        );
+
+        // Verify the server is no longer responding (if curl is available)
+        if server_responding {
+            // Give the server time to fully shut down
+            std::thread::sleep(Duration::from_millis(500));
+
+            let server_still_responding = std::process::Command::new("curl")
+                .args([
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "--connect-timeout",
+                    "2",
+                    server_url,
+                ])
+                .output()
+                .map(|output| {
+                    String::from_utf8(output.stdout)
+                        .map(|s| s.trim() == "200")
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+
+            assert!(
+                !server_still_responding,
+                "Web server should not be responding after stop command"
+            );
+        }
+
+        test_env.stop_daemon();
+        let _ = daemon_process.wait();
+    }
+
+    #[test]
     fn test_error_handling_via_cli() {
         let test_env = TestEnvironment::new();
         test_env.setup_test_project();
