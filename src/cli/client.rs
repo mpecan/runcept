@@ -170,6 +170,11 @@ impl DaemonClient {
             "Timeout waiting for daemon to start".to_string(),
         ))
     }
+
+    /// Get the socket path for the daemon
+    pub fn get_socket_path(&self) -> Result<PathBuf> {
+        Ok(self.socket_path.clone())
+    }
 }
 
 impl Default for DaemonClient {

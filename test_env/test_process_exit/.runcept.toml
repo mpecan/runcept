@@ -1,0 +1,9 @@
+[environment]
+name = "test"
+inactivity_timeout = "10m"
+
+[processes.short_task]
+name = "short_task"
+command = "echo Hello World && sleep 2"
+working_dir = "."
+auto_restart = false

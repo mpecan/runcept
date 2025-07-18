@@ -1,5 +1,6 @@
 use crate::cli::commands::ProcessInfo;
 use crate::config::ProcessDefinition;
+use crate::database::ProcessRepository;
 use crate::error::{Result, RunceptError};
 use crate::process::configuration::ProcessConfigurationManager;
 use crate::process::{LogEntry, Process, ProcessLogger, ProcessStatus};
@@ -9,8 +10,16 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc, broadcast};
 use tracing::{debug, error, info, warn};
+
+/// Notification sent when a process exits
+#[derive(Debug, Clone)]
+pub struct ProcessExitNotification {
+    pub process_name: String,
+    pub environment_id: String,
+    pub exit_status: std::process::ExitStatus,
+}
 
 /// Handle for a running process
 pub struct ProcessHandle {
@@ -21,14 +30,18 @@ pub struct ProcessHandle {
 
 /// Manages the runtime execution of processes
 pub struct ProcessRuntimeManager {
-    /// Running processes mapped by environment_id -> process_name -> process
-    pub processes: HashMap<String, HashMap<String, Process>>,
     /// Process handles mapped by environment_id -> process_name -> handle
+    /// This is the only in-memory state we need - actual process data is stored in DB
     pub process_handles: HashMap<String, HashMap<String, ProcessHandle>>,
     /// Reference to configuration manager
     pub process_configuration_manager: Arc<RwLock<ProcessConfigurationManager>>,
     /// Global configuration
     pub global_config: crate::config::GlobalConfig,
+    /// Channel for receiving process exit notifications
+    pub exit_notification_tx: broadcast::Sender<ProcessExitNotification>,
+    pub exit_notification_rx: broadcast::Receiver<ProcessExitNotification>,
+    /// Process repository for database operations (required for DB-first approach)
+    pub process_repository: Arc<ProcessRepository>,
 }
 
 impl ProcessRuntimeManager {
@@ -36,12 +49,17 @@ impl ProcessRuntimeManager {
     pub fn new(
         process_configuration_manager: Arc<RwLock<ProcessConfigurationManager>>,
         global_config: crate::config::GlobalConfig,
+        process_repository: Arc<ProcessRepository>,
     ) -> Self {
+        let (exit_notification_tx, exit_notification_rx) = broadcast::channel(100);
+        
         Self {
-            processes: HashMap::new(),
             process_handles: HashMap::new(),
             process_configuration_manager,
             global_config,
+            exit_notification_tx,
+            exit_notification_rx,
+            process_repository,
         }
     }
 
@@ -62,9 +80,9 @@ impl ProcessRuntimeManager {
             (process_def, working_dir)
         };
 
-        // Check if process is already running
-        if let Some(env_processes) = self.processes.get(environment_id) {
-            if env_processes.contains_key(name) {
+        // Check if process is already running by querying the database
+        if let Ok(Some(existing_process)) = self.process_repository.get_process_by_id(&format!("{environment_id}:{name}")).await {
+            if existing_process.status == "running" || existing_process.status == "starting" {
                 return Err(RunceptError::ProcessError(format!(
                     "Process '{name}' is already running in environment '{environment_id}'"
                 )));
@@ -90,27 +108,33 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        // Get environment processes and the specific process
-        let process = self
-            .processes
-            .get_mut(environment_id)
-            .ok_or_else(|| {
-                RunceptError::ProcessError(format!(
-                    "No processes found in environment '{environment_id}'"
-                ))
-            })?
-            .get_mut(name)
-            .ok_or_else(|| {
-                RunceptError::ProcessError(format!(
+        // Check if process exists and is running in the database
+        let process_id = format!("{}:{}", environment_id, name);
+        let process_status = match self.process_repository.get_process_by_id(&process_id).await {
+            Ok(Some(process)) => process.status,
+            Ok(None) => {
+                return Err(RunceptError::ProcessError(format!(
                     "Process '{name}' not found in environment '{environment_id}'"
-                ))
-            })?;
+                )));
+            }
+            Err(e) => {
+                return Err(RunceptError::ProcessError(format!(
+                    "Failed to query process status for '{}': {}",
+                    process_id, e
+                )));
+            }
+        };
 
-        if !process.is_running() {
+        // Check if process is already stopped
+        if process_status == "stopped" || process_status == "failed" || process_status == "crashed" {
             return Ok(()); // Already stopped
         }
 
-        process.transition_to(ProcessStatus::Stopping);
+        // Update process status to stopping in database
+        self.process_repository.update_process_status(&process_id, "stopping").await
+            .map_err(|e| RunceptError::ProcessError(format!(
+                "Failed to update process status to stopping: {}", e
+            )))?;
 
         // Get process handle and attempt graceful shutdown
         if let Some(env_handles) = self.process_handles.get(environment_id) {
@@ -170,13 +194,17 @@ impl ProcessRuntimeManager {
             }
         }
 
-        // Update process status to stopped
-        if let Some(env_processes) = self.processes.get_mut(environment_id) {
-            if let Some(process) = env_processes.get_mut(name) {
-                process.transition_to(ProcessStatus::Stopped);
-                process.clear_pid();
-            }
-        }
+        // Update process status to stopped in database
+        self.process_repository.update_process_status(&process_id, "stopped").await
+            .map_err(|e| RunceptError::ProcessError(format!(
+                "Failed to update process status to stopped: {}", e
+            )))?;
+        
+        // Clear the PID in database
+        self.process_repository.clear_process_pid(&process_id).await
+            .map_err(|e| RunceptError::ProcessError(format!(
+                "Failed to clear process PID: {}", e
+            )))?;
 
         info!(
             "Successfully stopped process '{}' in environment '{}'",
@@ -212,45 +240,63 @@ impl ProcessRuntimeManager {
     }
 
     /// List running processes in the specified environment
-    pub fn list_running_processes(&self, environment_id: &str) -> Vec<ProcessInfo> {
+    pub async fn list_running_processes(&self, environment_id: &str) -> Vec<ProcessInfo> {
         debug!(
             "Listing running processes in environment '{}'",
             environment_id
         );
 
-        if let Some(env_processes) = self.processes.get(environment_id) {
-            env_processes
-                .values()
+        // Query processes from database
+        match self.process_repository.get_processes_by_environment(environment_id).await {
+            Ok(processes) => processes
+                .into_iter()
                 .map(|process| {
                     ProcessInfo {
                         id: process.id.clone(),
                         name: process.name.clone(),
-                        status: process.status.to_string(),
-                        pid: process.pid,
+                        status: process.status.clone(),
+                        pid: process.pid.map(|p| p as u32),
                         uptime: Some(process.created_at.format("%Y-%m-%d %H:%M:%S").to_string()),
                         environment: environment_id.to_string(),
                         health_status: None, // TODO: Implement health status tracking
                         restart_count: 0,    // TODO: Implement restart count tracking
-                        last_activity: process.last_activity.map(|t| format!("{t:?}")),
+                        last_activity: None, // TODO: Implement last activity tracking
                     }
                 })
-                .collect()
-        } else {
-            Vec::new()
+                .collect(),
+            Err(e) => {
+                error!("Failed to query processes for environment '{}': {}", environment_id, e);
+                Vec::new()
+            }
         }
     }
 
     /// Get the status of a specific process in the specified environment
-    pub fn get_process_status(&self, name: &str, environment_id: &str) -> Option<ProcessStatus> {
+    pub async fn get_process_status(&self, name: &str, environment_id: &str) -> Option<ProcessStatus> {
         debug!(
             "Getting status for process '{}' in environment '{}'",
             name, environment_id
         );
 
-        self.processes
-            .get(environment_id)
-            .and_then(|env_processes| env_processes.get(name))
-            .map(|process| process.status.clone())
+        let process_id = format!("{}:{}", environment_id, name);
+        match self.process_repository.get_process_by_id(&process_id).await {
+            Ok(Some(process)) => {
+                match process.status.as_str() {
+                    "running" => Some(ProcessStatus::Running),
+                    "stopped" => Some(ProcessStatus::Stopped),
+                    "starting" => Some(ProcessStatus::Starting),
+                    "stopping" => Some(ProcessStatus::Stopping),
+                    "failed" => Some(ProcessStatus::Failed),
+                    "crashed" => Some(ProcessStatus::Crashed),
+                    _ => Some(ProcessStatus::Stopped),
+                }
+            },
+            Ok(None) => None,
+            Err(e) => {
+                error!("Failed to query process status for '{}': {}", process_id, e);
+                None
+            }
+        }
     }
 
     /// Get logs for a specific process in the specified environment
@@ -292,26 +338,21 @@ impl ProcessRuntimeManager {
             environment_id
         );
 
-        // First update process statuses
-        self.update_process_statuses(environment_id).await?;
-
         let mut finished_processes = Vec::new();
 
-        if let Some(env_processes) = self.processes.get(environment_id) {
-            let finished_names: Vec<String> = env_processes
-                .iter()
-                .filter(|(_, process)| {
-                    matches!(
-                        process.status,
-                        ProcessStatus::Stopped | ProcessStatus::Failed | ProcessStatus::Crashed
-                    ) && !process.auto_restart
-                })
-                .map(|(name, _)| name.clone())
-                .collect();
-
-            for name in finished_names {
-                self.remove_process_from_tracking(&name, environment_id);
-                finished_processes.push(name);
+        // Query finished processes from database
+        match self.process_repository.get_processes_by_environment(environment_id).await {
+            Ok(processes) => {
+                for process in processes {
+                    if matches!(process.status.as_str(), "stopped" | "failed" | "crashed") {
+                        // Remove from tracking (handles only, process data is in DB)
+                        self.remove_process_from_tracking(&process.name, environment_id);
+                        finished_processes.push(process.name);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to query processes for environment '{}': {}", environment_id, e);
             }
         }
 
@@ -322,16 +363,20 @@ impl ProcessRuntimeManager {
     pub async fn stop_all_processes(&mut self, environment_id: &str) -> Result<()> {
         info!("Stopping all processes in environment '{}'", environment_id);
 
-        if let Some(env_processes) = self.processes.get(environment_id) {
-            let process_names: Vec<String> = env_processes.keys().cloned().collect();
-
-            for name in process_names {
-                if let Err(e) = self.stop_process(&name, environment_id).await {
-                    warn!(
-                        "Failed to stop process '{}' in environment '{}': {}",
-                        name, environment_id, e
-                    );
+        // Get all processes for this environment from database
+        match self.process_repository.get_processes_by_environment(environment_id).await {
+            Ok(processes) => {
+                for process in processes {
+                    if let Err(e) = self.stop_process(&process.name, environment_id).await {
+                        warn!(
+                            "Failed to stop process '{}' in environment '{}': {}",
+                            process.name, environment_id, e
+                        );
+                    }
                 }
+            }
+            Err(e) => {
+                error!("Failed to query processes for environment '{}': {}", environment_id, e);
             }
         }
 
@@ -417,17 +462,37 @@ impl ProcessRuntimeManager {
         })?;
 
         // Get the PID
-        if let Some(pid) = child.id() {
-            process.set_pid(pid);
-        }
+        let pid = child.id().map(|p| p as i64);
+        
+        // Create process ID (unique identifier)
+        let process_id = format!("{}:{}", environment_id, process_def.name);
+
+        // Store process in database with "starting" status
+        self.process_repository
+            .insert_process(
+                &process_id,
+                &process_def.name,
+                &process_def.command,
+                &working_dir.to_string_lossy(),
+                environment_id,
+                "starting",
+                pid,
+            )
+            .await
+            .map_err(|e| {
+                RunceptError::ProcessError(format!(
+                    "Failed to store process '{}' in database: {}",
+                    process_def.name, e
+                ))
+            })?;
 
         // Create process logger
-        let logger = ProcessLogger::new(process.name.clone(), working_dir.to_path_buf())
+        let logger = ProcessLogger::new(process_def.name.clone(), working_dir.to_path_buf())
             .await
             .map_err(|e| {
                 RunceptError::ProcessError(format!(
                     "Failed to create logger for process '{}': {}",
-                    process.name, e
+                    process_def.name, e
                 ))
             })?;
 
@@ -441,12 +506,18 @@ impl ProcessRuntimeManager {
             .take()
             .ok_or_else(|| RunceptError::ProcessError("Failed to capture stderr".to_string()))?;
 
-        // Transition to running
-        process.transition_to(ProcessStatus::Running);
-        process.update_activity();
+        // Update process status to running in database
+        self.process_repository
+            .update_process_status(&process_id, "running")
+            .await
+            .map_err(|e| {
+                RunceptError::ProcessError(format!(
+                    "Failed to update process '{}' status to running: {}",
+                    process_def.name, e
+                ))
+            })?;
 
-        let process_name = process.name.clone();
-        let process_id = process.id.clone();
+        let process_name = process_def.name.clone();
 
         // Set up shutdown channel
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
@@ -464,19 +535,12 @@ impl ProcessRuntimeManager {
         self.process_handles
             .entry(environment_id.to_string())
             .or_default();
-        self.processes
-            .entry(environment_id.to_string())
-            .or_default();
 
-        // Store process and handle
+        // Store only the process handle (process data is in database)
         self.process_handles
             .get_mut(environment_id)
             .unwrap()
             .insert(process_name.clone(), handle);
-        self.processes
-            .get_mut(environment_id)
-            .unwrap()
-            .insert(process_name.clone(), process);
 
         // Spawn logging and monitoring tasks
         Self::spawn_output_logging_task(stdout, Arc::clone(&logger_handle), true);
@@ -488,6 +552,7 @@ impl ProcessRuntimeManager {
             process_name.clone(),
             shutdown_rx,
             environment_id.to_string(),
+            self.exit_notification_tx.clone(),
         );
 
         Ok(process_id)
@@ -503,36 +568,31 @@ impl ProcessRuntimeManager {
                 if let Some(child) = child_guard.as_mut() {
                     match child.try_wait() {
                         Ok(Some(_exit_status)) => {
-                            to_update.push((name.clone(), ProcessStatus::Stopped));
+                            to_update.push((name.clone(), "stopped"));
                             child_guard.take();
                         }
                         Ok(None) => {
                             // Process is still running
                         }
                         Err(_e) => {
-                            to_update.push((name.clone(), ProcessStatus::Crashed));
+                            to_update.push((name.clone(), "crashed"));
                             child_guard.take();
                         }
                     }
-                } else if let Some(env_processes) = self.processes.get(environment_id) {
-                    if let Some(process) = env_processes.get(name) {
-                        if matches!(
-                            process.status,
-                            ProcessStatus::Running | ProcessStatus::Stopping
-                        ) {
-                            to_update.push((name.clone(), ProcessStatus::Stopped));
-                        }
-                    }
+                } else {
+                    // No child handle means process should be marked as stopped
+                    to_update.push((name.clone(), "stopped"));
                 }
             }
 
-            // Update process statuses
+            // Update process statuses in database
             for (name, new_status) in to_update {
-                if let Some(env_processes) = self.processes.get_mut(environment_id) {
-                    if let Some(process) = env_processes.get_mut(&name) {
-                        process.transition_to(new_status);
-                        process.clear_pid();
-                    }
+                let process_id = format!("{}:{}", environment_id, name);
+                if let Err(e) = self.process_repository.update_process_status(&process_id, &new_status).await {
+                    error!("Failed to update process status for '{}': {}", process_id, e);
+                }
+                if let Err(e) = self.process_repository.clear_process_pid(&process_id).await {
+                    error!("Failed to clear process PID for '{}': {}", process_id, e);
                 }
             }
         }
@@ -540,11 +600,9 @@ impl ProcessRuntimeManager {
         Ok(())
     }
 
-    /// Helper method to remove a process from both tracking collections
+    /// Helper method to remove a process from tracking collections
+    /// (Only removes handles now, process data is in database)
     fn remove_process_from_tracking(&mut self, name: &str, environment_id: &str) {
-        if let Some(env_processes) = self.processes.get_mut(environment_id) {
-            env_processes.remove(name);
-        }
         if let Some(env_handles) = self.process_handles.get_mut(environment_id) {
             env_handles.remove(name);
         }
@@ -557,8 +615,21 @@ impl ProcessRuntimeManager {
             use nix::sys::signal::kill;
             use nix::unistd::Pid;
 
-            let nix_pid = Pid::from_raw(pid as i32);
-            kill(nix_pid, None).is_ok()
+            // Handle potential invalid PIDs gracefully
+            if pid == 0 {
+                return false;
+            }
+            
+            let nix_pid = match Pid::from_raw(pid as i32) {
+                pid if pid.as_raw() > 0 => pid,
+                _ => return false,
+            };
+            
+            // Use kill with signal 0 to check if process exists
+            match kill(nix_pid, None) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
         }
 
         #[cfg(not(unix))]
@@ -569,15 +640,60 @@ impl ProcessRuntimeManager {
         }
     }
 
+    /// Process any pending exit notifications
+    pub async fn process_exit_notifications(&mut self) -> Result<()> {
+        // Process all pending notifications
+        while let Ok(notification) = self.exit_notification_rx.try_recv() {
+            debug!(
+                "Processing exit notification for process '{}' in environment '{}'",
+                notification.process_name, notification.environment_id
+            );
+            
+            // Create process ID
+            let process_id = format!("{}:{}", notification.environment_id, notification.process_name);
+            
+            // Update process status to stopped in database
+            if let Err(e) = self.process_repository.update_process_status(&process_id, "stopped").await {
+                error!(
+                    "Failed to update process status in database for '{}' in environment '{}': {}",
+                    notification.process_name, notification.environment_id, e
+                );
+            }
+            
+            // Also clear the PID in the database
+            if let Err(e) = self.process_repository.clear_process_pid(&process_id).await {
+                error!(
+                    "Failed to clear process PID in database for '{}' in environment '{}': {}",
+                    notification.process_name, notification.environment_id, e
+                );
+            }
+            
+            info!(
+                "Process '{}' in environment '{}' marked as stopped after exit with status: {}",
+                notification.process_name, notification.environment_id, notification.exit_status
+            );
+            
+            // Remove the process handle since it's no longer needed
+            if let Some(env_handles) = self.process_handles.get_mut(&notification.environment_id) {
+                env_handles.remove(&notification.process_name);
+            }
+        }
+        
+        Ok(())
+    }
+
     /// Clean up stale processes that are marked as running in the database but no longer exist
-    pub async fn cleanup_stale_processes(
-        &mut self,
-        query_manager: &crate::database::QueryManager<'_>,
-    ) -> Result<()> {
+    pub async fn cleanup_stale_processes(&mut self) -> Result<()> {
         info!("Cleaning up stale processes from database");
 
         // Get all processes marked as running in the database
-        let running_processes = query_manager.get_running_processes().await?;
+        let running_processes = match self.process_repository.get_running_processes().await {
+            Ok(processes) => processes,
+            Err(e) => {
+                error!("Failed to query running processes: {}", e);
+                return Ok(()); // Continue with startup even if we can't query
+            }
+        };
 
         let mut cleaned_up = 0;
 
@@ -597,10 +713,7 @@ impl ProcessRuntimeManager {
                 );
 
                 // Update status in database
-                if let Err(e) = query_manager
-                    .update_process_status(&process_id, "stopped")
-                    .await
-                {
+                if let Err(e) = self.process_repository.update_process_status(&process_id, "stopped").await {
                     error!(
                         "Failed to update process status for '{}': {}",
                         process_id, e
@@ -608,7 +721,7 @@ impl ProcessRuntimeManager {
                 }
 
                 // Clear PID in database
-                if let Err(e) = query_manager.clear_process_pid(&process_id).await {
+                if let Err(e) = self.process_repository.clear_process_pid(&process_id).await {
                     error!("Failed to clear PID for process '{}': {}", process_id, e);
                 }
 
@@ -660,6 +773,7 @@ impl ProcessRuntimeManager {
         process_name: String,
         mut shutdown_rx: mpsc::Receiver<()>,
         environment_id: String,
+        exit_notification_tx: broadcast::Sender<ProcessExitNotification>,
     ) {
         tokio::spawn(async move {
             let mut child_guard = child_handle.lock().await;
@@ -675,6 +789,20 @@ impl ProcessRuntimeManager {
                                     "Process '{}' in environment '{}' exited with status: {}",
                                     process_name, environment_id, exit_status
                                 );
+                                
+                                // Send exit notification
+                                let notification = ProcessExitNotification {
+                                    process_name: process_name.clone(),
+                                    environment_id: environment_id.clone(),
+                                    exit_status,
+                                };
+                                
+                                if let Err(e) = exit_notification_tx.send(notification) {
+                                    error!(
+                                        "Failed to send exit notification for process '{}' in environment '{}': {}",
+                                        process_name, environment_id, e
+                                    );
+                                }
                             }
                             Err(e) => {
                                 error!(

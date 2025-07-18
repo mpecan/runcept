@@ -374,6 +374,10 @@ impl CliHandler {
                 Ok(CliResult::Error("Daemon exited with error".to_string()))
             }
         } else {
+            // In background mode, detach the child process
+            // Give it a moment to start up
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            
             // Wait for daemon to be ready
             match self
                 .client
@@ -383,9 +387,15 @@ impl CliHandler {
                 Ok(_) => Ok(CliResult::Success(
                     "Daemon started successfully".to_string(),
                 )),
-                Err(_) => Ok(CliResult::Error(
-                    "Daemon failed to start within timeout".to_string(),
-                )),
+                Err(_) => {
+                    // If daemon failed to start, try to clean up the socket
+                    if let Ok(socket_path) = self.client.get_socket_path() {
+                        let _ = std::fs::remove_file(&socket_path);
+                    }
+                    Ok(CliResult::Error(
+                        "Daemon failed to start within timeout".to_string(),
+                    ))
+                }
             }
         }
     }

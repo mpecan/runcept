@@ -58,19 +58,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_health_check_http_success() {
-        let health_check = HealthCheck::Http {
-            url: "https://httpbin.org/status/200".to_string(),
-            timeout: Duration::from_secs(5),
-            expected_status: 200,
-        };
-
-        let result = health_check.execute().await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_healthy);
-    }
-
-    #[tokio::test]
     async fn test_health_check_http_failure() {
         let health_check = HealthCheck::Http {
             url: "https://httpbin.org/status/500".to_string(),

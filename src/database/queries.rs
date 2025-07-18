@@ -293,6 +293,56 @@ impl<'a> QueryManager<'a> {
         Ok(())
     }
 
+    /// Get all environments in specific statuses (returns just ID and status)
+    pub async fn get_environments_by_status_ids(
+        &self,
+        statuses: &[&str],
+    ) -> Result<Vec<(String, String)>> {
+        let status_placeholders = statuses.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let query = format!(
+            r#"
+            SELECT id, status 
+            FROM environments 
+            WHERE status IN ({})
+            ORDER BY id
+            "#,
+            status_placeholders
+        );
+
+        let mut query_builder = sqlx::query(&query);
+        for status in statuses {
+            query_builder = query_builder.bind(*status);
+        }
+
+        let rows = query_builder.fetch_all(self.pool).await?;
+
+        let mut environments = Vec::new();
+        for row in rows {
+            let env_id: String = row.get("id");
+            let status: String = row.get("status");
+            environments.push((env_id, status));
+        }
+
+        Ok(environments)
+    }
+
+    /// Update environment status in the database
+    pub async fn update_environment_status(&self, env_id: &str, status: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE environments 
+            SET status = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+            "#,
+        )
+        .bind(status)
+        .bind(env_id)
+        .execute(self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     // Environment database operations
 
     /// Insert a new environment into the database

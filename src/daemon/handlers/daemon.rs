@@ -1,12 +1,12 @@
 use crate::cli::commands::{DaemonResponse, DaemonStatusResponse};
 use crate::config::EnvironmentManager;
-use crate::error::Result;
+use crate::error::{Result, RunceptError};
 use crate::process::ProcessManager;
 use crate::scheduler::InactivityScheduler;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 
 /// Handles for daemon-related operations
 #[derive(Clone)]
@@ -17,6 +17,7 @@ pub struct DaemonHandles {
     current_environment_id: Arc<RwLock<Option<String>>>,
     socket_path: PathBuf,
     start_time: SystemTime,
+    shutdown_tx: Option<mpsc::Sender<()>>,
 }
 
 impl DaemonHandles {
@@ -27,6 +28,7 @@ impl DaemonHandles {
         current_environment_id: Arc<RwLock<Option<String>>>,
         socket_path: PathBuf,
         start_time: SystemTime,
+        shutdown_tx: Option<mpsc::Sender<()>>,
     ) -> Self {
         Self {
             process_manager,
@@ -35,6 +37,7 @@ impl DaemonHandles {
             current_environment_id,
             socket_path,
             start_time,
+            shutdown_tx,
         }
     }
 
@@ -90,6 +93,19 @@ impl DaemonHandles {
 
         Ok(DaemonResponse::Success {
             message: format!("Activity recorded for environment: {}", environment_id),
+        })
+    }
+
+    /// Request daemon shutdown
+    pub async fn request_shutdown(&self) -> Result<DaemonResponse> {
+        if let Some(tx) = &self.shutdown_tx {
+            tx.send(()).await.map_err(|e| {
+                RunceptError::EnvironmentError(format!("Failed to send shutdown signal: {}", e))
+            })?;
+        }
+        
+        Ok(DaemonResponse::Success {
+            message: "Shutdown initiated".to_string(),
         })
     }
 }

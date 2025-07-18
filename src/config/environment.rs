@@ -993,4 +993,94 @@ impl EnvironmentManager {
             Ok(results)
         }
     }
+
+    /// Deactivate all active environments (used during daemon shutdown)
+    pub async fn deactivate_all_environments(&mut self) -> Result<()> {
+        tracing::info!("Deactivating all environments");
+
+        let active_env_ids: Vec<String> = self
+            .environments
+            .iter()
+            .filter(|(_, env)| env.is_active())
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        let mut deactivated = 0;
+
+        for env_id in active_env_ids {
+            match self.deactivate_environment(&env_id).await {
+                Ok(_) => {
+                    tracing::info!("Deactivated environment '{}'", env_id);
+                    deactivated += 1;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to deactivate environment '{}': {}", env_id, e);
+                }
+            }
+        }
+
+        if deactivated > 0 {
+            tracing::info!("Deactivated {} environments", deactivated);
+        } else {
+            tracing::info!("No environments to deactivate");
+        }
+
+        Ok(())
+    }
+
+    /// Clean up stale environments that are stuck in intermediate states
+    pub async fn cleanup_stale_environments(
+        &mut self,
+        query_manager: &crate::database::QueryManager<'_>,
+    ) -> Result<()> {
+        tracing::info!("Cleaning up stale environments from database");
+
+        // Get environments that are in intermediate states (activating, deactivating)
+        let stale_environments = match query_manager
+            .get_environments_by_status_ids(&["activating", "deactivating"])
+            .await
+        {
+            Ok(environments) => environments,
+            Err(e) => {
+                tracing::error!("Failed to query stale environments: {}", e);
+                return Ok(()); // Continue with startup even if we can't query
+            }
+        };
+
+        let mut cleaned_up = 0;
+
+        for (env_id, current_status) in stale_environments {
+            tracing::info!(
+                "Cleaning up stale environment '{}' from status '{}'",
+                env_id,
+                current_status
+            );
+
+            // Reset to inactive state
+            if let Err(e) = query_manager
+                .update_environment_status(&env_id, "inactive")
+                .await
+            {
+                tracing::error!(
+                    "Failed to update environment status for '{}': {}",
+                    env_id,
+                    e
+                );
+            } else {
+                // Also update in-memory state if the environment is loaded
+                if let Some(env) = self.environments.get_mut(&env_id) {
+                    env.transition_to(EnvironmentStatus::Inactive);
+                }
+                cleaned_up += 1;
+            }
+        }
+
+        if cleaned_up > 0 {
+            tracing::info!("Cleaned up {} stale environments", cleaned_up);
+        } else {
+            tracing::info!("No stale environments found");
+        }
+
+        Ok(())
+    }
 }

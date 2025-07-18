@@ -36,6 +36,7 @@ impl DaemonServer {
     pub async fn new(config: ServerConfig) -> Result<Self> {
         // Create environment manager with optional database
         let database_pool = config.database.as_ref().map(|db| db.get_pool().clone());
+        let database_pool_arc = database_pool.as_ref().map(|pool| Arc::new(pool.clone()));
         let environment_manager = Arc::new(RwLock::new(
             EnvironmentManager::new_with_database(config.global_config.clone(), database_pool)
                 .await?,
@@ -45,6 +46,7 @@ impl DaemonServer {
             ProcessManager::new_with_environment_manager(
                 config.global_config.clone(),
                 environment_manager.clone(),
+                database_pool_arc,
             )
             .await?,
         ));
@@ -67,28 +69,48 @@ impl DaemonServer {
 
         // Perform startup cleanup if database is available
         if let Some(database) = &server.config.database {
-            server.perform_startup_cleanup(database).await?;
+            // Only perform cleanup if database is properly initialized
+            if let Err(e) = server.perform_startup_cleanup(database).await {
+                error!("Startup cleanup failed: {}", e);
+                // Continue with startup even if cleanup fails
+            }
         }
 
         Ok(server)
     }
 
-    /// Perform startup cleanup of stale processes
+    /// Perform startup cleanup of stale processes and environments
     async fn perform_startup_cleanup(&self, database: &crate::database::Database) -> Result<()> {
-        info!("Performing startup cleanup of stale processes");
+        info!("Performing startup cleanup of stale processes and environments");
 
         // Create query manager for database operations
         let query_manager = crate::database::QueryManager::new(database.get_pool());
 
+        // Cleanup stale environments first
+        {
+            let mut env_manager = self.environment_manager.write().await;
+            if let Err(e) = env_manager
+                .cleanup_stale_environments(&query_manager)
+                .await
+            {
+                error!("Failed to cleanup stale environments: {}", e);
+                // Continue with startup even if environment cleanup fails
+            }
+        }
+
         // Cleanup stale processes via the runtime manager
         {
             let mut process_manager = self.process_manager.write().await;
-            process_manager
+            if let Err(e) = process_manager
                 .runtime_manager
                 .write()
                 .await
-                .cleanup_stale_processes(&query_manager)
-                .await?;
+                .cleanup_stale_processes()
+                .await
+            {
+                error!("Failed to cleanup stale processes: {}", e);
+                // Continue with startup even if process cleanup fails
+            }
         }
 
         info!("Startup cleanup completed");
@@ -105,6 +127,20 @@ impl DaemonServer {
         // Set up shutdown channel
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
+
+        // Remove existing socket file if it exists
+        if self.config.socket_path.exists() {
+            std::fs::remove_file(&self.config.socket_path).map_err(|e| {
+                RunceptError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "Failed to remove existing socket {}: {}",
+                        self.config.socket_path.display(),
+                        e
+                    ),
+                ))
+            })?;
+        }
 
         // Create Unix socket listener
         let listener = UnixListener::bind(&self.config.socket_path).map_err(|e| {
@@ -144,6 +180,7 @@ impl DaemonServer {
             self.current_environment_id.clone(),
             self.config.socket_path.clone(),
             self.start_time,
+            self.shutdown_tx.clone(),
         );
 
         // Create request processor
@@ -224,6 +261,17 @@ impl DaemonServer {
             tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
 
             info!("All processes have been stopped");
+        }
+
+        // Deactivate all environments before shutting down
+        {
+            info!("Deactivating all environments before daemon shutdown");
+            let mut env_manager = self.environment_manager.write().await;
+            if let Err(e) = env_manager.deactivate_all_environments().await {
+                error!("Failed to deactivate all environments: {}", e);
+            } else {
+                info!("All environments have been deactivated");
+            }
         }
 
         // Stop inactivity scheduler
@@ -346,11 +394,8 @@ impl RequestProcessor {
                     .await
             }
             DaemonRequest::Shutdown => {
-                // Note: This doesn't actually shut down the server, just returns success
-                // The actual shutdown is handled by the request_shutdown method
-                Ok(DaemonResponse::Success {
-                    message: "Shutdown initiated".to_string(),
-                })
+                // Delegate to daemon handles to actually trigger shutdown
+                self.daemon_handles.request_shutdown().await
             }
 
             // Process management commands
@@ -389,17 +434,28 @@ mod tests {
     use super::*;
     use crate::cli::commands::{DaemonRequest, DaemonResponse};
     use crate::config::GlobalConfig;
+    use crate::database::Database;
     use tempfile::TempDir;
+
+    /// Create an in-memory database for testing
+    async fn create_test_database() -> Database {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+        db
+    }
 
     #[tokio::test]
     async fn test_daemon_server_creation() {
         let temp_dir = TempDir::new().unwrap();
         let socket_path = temp_dir.path().join("test.sock");
 
+        // Create test database
+        let database = create_test_database().await;
+
         let config = ServerConfig {
             socket_path: socket_path.clone(),
             global_config: GlobalConfig::default(),
-            database: None,
+            database: Some(database),
         };
 
         let server = DaemonServer::new(config).await.unwrap();
