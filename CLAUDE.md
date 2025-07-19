@@ -50,11 +50,97 @@ cargo clippy -- -D warnings
 cargo fmt && cargo clippy -- -D warnings && cargo test
 ```
 
+### Development Workflow
+1. **Before starting any code changes**:
+   ```bash
+   cargo fmt && cargo clippy -- -D warnings
+   ```
+2. **During development** (run frequently):
+   ```bash
+   cargo check  # Fast compilation check
+   cargo clippy -- -D warnings  # Check for issues early
+   ```
+3. **Before committing**:
+   ```bash
+   cargo fmt && cargo clippy -- -D warnings && cargo test
+   ```
+4. **If clippy warnings appear**:
+   - Fix them immediately, don't let them accumulate
+   - Use the specific examples in this guide
+   - Prefer fixing over allowing warnings
+
 ### Code Formatting
 - **ALWAYS run `cargo fmt` before committing code**
 - Code formatting is enforced with rustfmt to maintain consistency
 - All code should follow the project's formatting standards
 - Use `cargo fmt` during development to catch formatting issues early
+
+### Rust Code Quality Guidelines
+
+#### Clippy Compliance
+- **MANDATORY**: All code must pass `cargo clippy -- -D warnings` (warnings treated as errors)
+- Fix clippy warnings immediately, do not use `#[allow(...)]` unless absolutely necessary
+- Common issues to avoid:
+  - **Format String Warnings**: Use direct variable interpolation: `format!("Hello {name}")` instead of `format!("Hello {}", name)`
+  - **Too Many Arguments**: Methods with >7 parameters should use struct parameters instead
+  - **Method Naming**: Methods named `new()` must return `Self`, use descriptive names like `create_channels()` for other constructors
+  - **Needless Borrows**: Remove unnecessary `&` when the compiler suggests it
+
+#### Format String Best Practices
+- **Always use direct variable interpolation in format strings**:
+  ```rust
+  // ✅ GOOD
+  format!("Process '{name}' failed with error: {error}")
+  
+  // ❌ BAD - triggers clippy::uninlined_format_args
+  format!("Process '{}' failed with error: {}", name, error)
+  ```
+- **Apply this to all formatting macros**: `format!()`, `println!()`, `error!()`, `info!()`, `debug!()`, etc.
+
+#### Method Design Guidelines
+- **Limit method parameters to 7 or fewer**
+- **For methods with many parameters**, use struct parameters:
+  ```rust
+  // ✅ GOOD
+  pub async fn insert_process(&self, process: &Process) -> Result<()>
+  
+  // ❌ BAD - too many arguments
+  pub async fn insert_process(&self, id: &str, name: &str, command: &str, 
+                              working_dir: &str, env_id: &str, status: &str, 
+                              pid: Option<i64>) -> Result<()>
+  ```
+
+#### Constructor Naming Conventions
+- **Methods named `new()`** must return `Self`
+- **For other constructors**, use descriptive names:
+  ```rust
+  // ✅ GOOD
+  impl MyStruct {
+      pub fn new() -> Self { ... }                    // Returns Self
+      pub fn create_channels() -> Channels { ... }    // Returns different type
+      pub fn with_config(config: Config) -> Self { ... } // Returns Self with parameters
+  }
+  ```
+
+#### Error Handling Patterns
+- **Use modern error creation patterns**:
+  ```rust
+  // ✅ GOOD
+  std::io::Error::other("Custom error message")
+  
+  // ❌ BAD - deprecated pattern
+  std::io::Error::new(std::io::ErrorKind::Other, "Custom error message")
+  ```
+
+#### Import Organization
+- **Use module re-exports properly**:
+  ```rust
+  // ✅ GOOD - use re-exported types
+  use crate::process::Process;
+  
+  // ❌ BAD - accessing private modules
+  use crate::process::types::Process;
+  ```
 
 ### Project Structure Rules
 - Keep modules focused and small

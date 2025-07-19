@@ -303,10 +303,9 @@ impl<'a> QueryManager<'a> {
             r#"
             SELECT id, status 
             FROM environments 
-            WHERE status IN ({})
+            WHERE status IN ({status_placeholders})
             ORDER BY id
-            "#,
-            status_placeholders
+            "#
         );
 
         let mut query_builder = sqlx::query(&query);

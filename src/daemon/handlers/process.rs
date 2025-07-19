@@ -115,7 +115,7 @@ impl ProcessHandles {
     /// Kill all processes
     pub async fn kill_all_processes(&self) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(None).await?;
-        let mut process_manager = self.process_manager.write().await;
+        let process_manager = self.process_manager.write().await;
 
         match process_manager
             .runtime_manager
@@ -229,10 +229,10 @@ impl ProcessHandles {
             .await
         {
             Ok(_) => Ok(DaemonResponse::Success {
-                message: format!("Process '{}' removed successfully", name),
+                message: format!("Process '{name}' removed successfully"),
             }),
             Err(e) => Ok(DaemonResponse::Error {
-                error: format!("Failed to remove process '{}': {e}", name),
+                error: format!("Failed to remove process '{name}': {e}"),
             }),
         }
     }
@@ -252,10 +252,10 @@ impl ProcessHandles {
             .await
         {
             Ok(_) => Ok(DaemonResponse::Success {
-                message: format!("Process '{}' updated successfully", name),
+                message: format!("Process '{name}' updated successfully"),
             }),
             Err(e) => Ok(DaemonResponse::Error {
-                error: format!("Failed to update process '{}': {e}", name),
+                error: format!("Failed to update process '{name}': {e}"),
             }),
         }
     }
@@ -311,11 +311,10 @@ impl ProcessHandles {
 
                     if !env.is_active() {
                         return Err(RunceptError::EnvironmentError(format!(
-                            "Environment '{}' is registered but not active.\n\n\
+                            "Environment '{env_id}' is registered but not active.\n\n\
                             To fix this:\n\
-                            1. Run 'runcept activate {}' to activate the environment\n\
-                            2. Ensure the environment configuration is valid",
-                            env_id, env_id
+                            1. Run 'runcept activate {env_id}' to activate the environment\n\
+                            2. Ensure the environment configuration is valid"
                         )));
                     }
 
@@ -323,7 +322,7 @@ impl ProcessHandles {
                     if env.project_config.processes.is_empty() {
                         log_debug(
                             "daemon",
-                            &format!("Environment '{}' has no processes defined", env_id),
+                            &format!("Environment '{env_id}' has no processes defined"),
                             None,
                         );
                     }

@@ -89,10 +89,7 @@ impl DaemonServer {
         // Cleanup stale environments first
         {
             let mut env_manager = self.environment_manager.write().await;
-            if let Err(e) = env_manager
-                .cleanup_stale_environments(&query_manager)
-                .await
-            {
+            if let Err(e) = env_manager.cleanup_stale_environments(&query_manager).await {
                 error!("Failed to cleanup stale environments: {}", e);
                 // Continue with startup even if environment cleanup fails
             }
@@ -100,7 +97,7 @@ impl DaemonServer {
 
         // Cleanup stale processes via the runtime manager
         {
-            let mut process_manager = self.process_manager.write().await;
+            let process_manager = self.process_manager.write().await;
             if let Err(e) = process_manager
                 .runtime_manager
                 .write()
@@ -131,8 +128,7 @@ impl DaemonServer {
         // Remove existing socket file if it exists
         if self.config.socket_path.exists() {
             std::fs::remove_file(&self.config.socket_path).map_err(|e| {
-                RunceptError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                RunceptError::IoError(std::io::Error::other(
                     format!(
                         "Failed to remove existing socket {}: {}",
                         self.config.socket_path.display(),
@@ -144,8 +140,7 @@ impl DaemonServer {
 
         // Create Unix socket listener
         let listener = UnixListener::bind(&self.config.socket_path).map_err(|e| {
-            RunceptError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            RunceptError::IoError(std::io::Error::other(
                 format!(
                     "Failed to bind to socket {}: {}",
                     self.config.socket_path.display(),
@@ -233,7 +228,7 @@ impl DaemonServer {
         // Stop all running processes gracefully before shutting down
         {
             info!("Stopping all running processes before daemon shutdown");
-            let mut process_manager = self.process_manager.write().await;
+            let process_manager = self.process_manager.write().await;
 
             // Get all active environments and stop their processes
             let env_manager = self.environment_manager.read().await;
@@ -247,7 +242,7 @@ impl DaemonServer {
                     .runtime_manager
                     .write()
                     .await
-                    .stop_all_processes(&env_id)
+                    .stop_all_processes(env_id)
                     .await
                 {
                     error!(
@@ -296,46 +291,7 @@ impl DaemonServer {
     pub async fn request_shutdown(&self) -> Result<()> {
         if let Some(tx) = &self.shutdown_tx {
             tx.send(()).await.map_err(|e| {
-                RunceptError::EnvironmentError(format!("Failed to send shutdown signal: {}", e))
-            })?;
-        }
-        Ok(())
-    }
-
-    /// Clone handles for spawned tasks
-    pub fn clone_handles(&self) -> ServerHandles {
-        ServerHandles {
-            process_manager: Arc::clone(&self.process_manager),
-            environment_manager: Arc::clone(&self.environment_manager),
-            inactivity_scheduler: Arc::clone(&self.inactivity_scheduler),
-            current_environment_id: Arc::clone(&self.current_environment_id),
-            start_time: self.start_time,
-            socket_path: self.config.socket_path.clone(),
-            global_config: self.config.global_config.clone(),
-            shutdown_tx: self.shutdown_tx.clone(),
-        }
-    }
-}
-
-/// Handles for spawned connection tasks
-#[derive(Clone)]
-pub struct ServerHandles {
-    process_manager: Arc<RwLock<ProcessManager>>,
-    environment_manager: Arc<RwLock<EnvironmentManager>>,
-    inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
-    current_environment_id: Arc<RwLock<Option<String>>>,
-    start_time: SystemTime,
-    socket_path: PathBuf,
-    global_config: GlobalConfig,
-    shutdown_tx: Option<mpsc::Sender<()>>,
-}
-
-impl ServerHandles {
-    /// Request shutdown
-    pub async fn request_shutdown(&self) -> Result<()> {
-        if let Some(tx) = &self.shutdown_tx {
-            tx.send(()).await.map_err(|e| {
-                RunceptError::EnvironmentError(format!("Failed to send shutdown signal: {}", e))
+                RunceptError::EnvironmentError(format!("Failed to send shutdown signal: {e}"))
             })?;
         }
         Ok(())

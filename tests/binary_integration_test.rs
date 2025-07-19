@@ -126,7 +126,7 @@ auto_restart = true
         fn stop_daemon(&self) {
             // Send shutdown command
             let _ = self.runcept_cmd().args(["daemon", "stop"]).output();
-            
+
             // Wait for socket to be removed (daemon fully stopped)
             let socket_path = self.runcept_dir.join("daemon.sock");
             for _ in 0..50 {

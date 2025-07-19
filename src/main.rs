@@ -176,14 +176,16 @@ async fn run_daemon_process(args: Vec<String>) {
     }
 
     // Set up signal handling for graceful shutdown
-    let server_handle = server.clone_handles();
+    let server_shutdown_handle = server.shutdown_tx.clone();
     tokio::spawn(async move {
         tokio::signal::ctrl_c()
             .await
             .expect("Failed to listen for Ctrl+C");
         println!("Received Ctrl+C, shutting down...");
-        if let Err(e) = server_handle.request_shutdown().await {
-            eprintln!("Error during shutdown: {e}");
+        if let Some(tx) = server_shutdown_handle {
+            if let Err(e) = tx.send(()).await {
+                eprintln!("Error during shutdown: {e}");
+            }
         }
     });
 

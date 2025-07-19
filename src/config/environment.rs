@@ -494,7 +494,7 @@ impl EnvironmentManager {
         database_pool: Option<Pool<Sqlite>>,
     ) -> Result<Self> {
         // Create config watcher
-        let config_watcher_channels = ConfigWatcher::new();
+        let config_watcher_channels = ConfigWatcher::create_channels();
 
         let mut manager = Self {
             environments: HashMap::new(),
@@ -514,7 +514,7 @@ impl EnvironmentManager {
     /// Start the config change event loop
     pub fn start_config_event_loop(env_manager: std::sync::Arc<tokio::sync::RwLock<Self>>) {
         tokio::spawn(async move {
-            let mut receiver = {
+            let receiver = {
                 let mut manager = env_manager.write().await;
                 if let Some(channels) = manager.config_watcher_channels.take() {
                     Some(channels.event_receiver)
@@ -579,7 +579,7 @@ impl EnvironmentManager {
                 .send(watch_request)
                 .await
                 .map_err(|e| {
-                    RunceptError::ConfigError(format!("Failed to send watch request: {}", e))
+                    RunceptError::ConfigError(format!("Failed to send watch request: {e}"))
                 })?;
         }
 
@@ -598,7 +598,7 @@ impl EnvironmentManager {
                 .send(watch_request)
                 .await
                 .map_err(|e| {
-                    RunceptError::ConfigError(format!("Failed to send unwatch request: {}", e))
+                    RunceptError::ConfigError(format!("Failed to send unwatch request: {e}"))
                 })?;
         }
 

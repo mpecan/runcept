@@ -255,8 +255,7 @@ impl CliHandler {
                 .map(|abs_path| abs_path.to_string_lossy().to_string())
                 .map_err(|e| {
                     RunceptError::EnvironmentError(format!(
-                        "Invalid environment path '{}': {}",
-                        env_path, e
+                        "Invalid environment path '{env_path}': {e}"
                     ))
                 })?;
 
@@ -267,8 +266,7 @@ impl CliHandler {
             // Resolve from current working directory
             let cwd = std::env::current_dir().map_err(|e| {
                 RunceptError::EnvironmentError(format!(
-                    "Failed to get current working directory: {}",
-                    e
+                    "Failed to get current working directory: {e}"
                 ))
             })?;
 
@@ -304,11 +302,10 @@ impl CliHandler {
 
         if !config_path.exists() {
             return Err(RunceptError::EnvironmentError(format!(
-                "Environment path '{}' does not contain a .runcept.toml configuration file.\n\n\
+                "Environment path '{path}' does not contain a .runcept.toml configuration file.\n\n\
                 To fix this:\n\
-                1. Run 'runcept init {}' to create a new configuration\n\
-                2. Verify the path points to a valid project directory",
-                path, path
+                1. Run 'runcept init {path}' to create a new configuration\n\
+                2. Verify the path points to a valid project directory"
             )));
         }
 
@@ -316,11 +313,10 @@ impl CliHandler {
         match crate::config::project::ProjectConfig::load_from_path(&config_path).await {
             Ok(_) => Ok(()),
             Err(e) => Err(RunceptError::EnvironmentError(format!(
-                "Environment path '{}' contains an invalid .runcept.toml file: {}\n\n\
+                "Environment path '{path}' contains an invalid .runcept.toml file: {e}\n\n\
                 To fix this:\n\
                 1. Check the file syntax and format\n\
-                2. Run 'runcept init {} --force' to recreate the configuration",
-                path, e, path
+                2. Run 'runcept init {path} --force' to recreate the configuration"
             ))),
         }
     }
@@ -377,7 +373,7 @@ impl CliHandler {
             // In background mode, detach the child process
             // Give it a moment to start up
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            
+
             // Wait for daemon to be ready
             match self
                 .client

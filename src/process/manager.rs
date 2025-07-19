@@ -43,7 +43,11 @@ impl ProcessManager {
         // Create process repository - required for DB-first approach
         let process_repository = match database_pool {
             Some(pool) => Arc::new(crate::database::ProcessRepository::new(pool)),
-            None => return Err(RunceptError::DatabaseError("Database pool is required for ProcessRuntimeManager".to_string())),
+            None => {
+                return Err(RunceptError::DatabaseError(
+                    "Database pool is required for ProcessRuntimeManager".to_string(),
+                ));
+            }
         };
 
         let runtime_manager = Arc::new(RwLock::new(ProcessRuntimeManager::new(
@@ -176,7 +180,7 @@ impl ProcessManager {
             let mut runtime_manager = self.runtime_manager.write().await;
             runtime_manager.process_exit_notifications().await?;
         }
-        
+
         let runtime_manager = self.runtime_manager.read().await;
         Ok(runtime_manager.list_running_processes(environment_id).await)
     }
@@ -191,7 +195,7 @@ impl ProcessManager {
             let mut runtime_manager = self.runtime_manager.write().await;
             runtime_manager.process_exit_notifications().await?;
         }
-        
+
         // Get configured processes from environment
         let configured_processes = if let Some(env_manager) = &self.environment_manager {
             let env_manager_guard = env_manager.read().await;
@@ -199,8 +203,7 @@ impl ProcessManager {
                 env.project_config.processes.clone()
             } else {
                 return Err(RunceptError::EnvironmentError(format!(
-                    "Environment '{}' not found",
-                    environment_id
+                    "Environment '{environment_id}' not found"
                 )));
             }
         } else {
@@ -428,24 +431,28 @@ mod tests {
     #[tokio::test]
     async fn test_process_manager_creation() {
         let global_config = GlobalConfig::default();
-        
+
         // Create test database
         let database = create_test_database().await;
         let database_pool = Arc::new(database.get_pool().clone());
-        
+
         // Create environment manager with database
         let env_manager = Arc::new(tokio::sync::RwLock::new(
             crate::config::EnvironmentManager::new_with_database(
                 global_config.clone(),
                 Some(database.get_pool().clone()),
-            ).await.unwrap(),
+            )
+            .await
+            .unwrap(),
         ));
-        
+
         let manager = ProcessManager::new_with_environment_manager(
             global_config,
             env_manager,
             Some(database_pool),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         // With the new architecture, we have proper component delegation
         assert!(manager.environment_manager.is_some());
@@ -454,24 +461,28 @@ mod tests {
     #[tokio::test]
     async fn test_environment_resolution() {
         let global_config = GlobalConfig::default();
-        
+
         // Create test database
         let database = create_test_database().await;
         let database_pool = Arc::new(database.get_pool().clone());
-        
+
         // Create environment manager with database
         let env_manager = Arc::new(tokio::sync::RwLock::new(
             crate::config::EnvironmentManager::new_with_database(
                 global_config.clone(),
                 Some(database.get_pool().clone()),
-            ).await.unwrap(),
+            )
+            .await
+            .unwrap(),
         ));
-        
+
         let manager = ProcessManager::new_with_environment_manager(
             global_config,
             env_manager,
             Some(database_pool),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         // Test environment resolution with no active environment
         let result = manager.resolve_environment_id(None).await;
@@ -488,24 +499,28 @@ mod tests {
     #[tokio::test]
     async fn test_component_delegation() {
         let global_config = GlobalConfig::default();
-        
+
         // Create test database
         let database = create_test_database().await;
         let database_pool = Arc::new(database.get_pool().clone());
-        
+
         // Create environment manager with database
         let env_manager = Arc::new(tokio::sync::RwLock::new(
             crate::config::EnvironmentManager::new_with_database(
                 global_config.clone(),
                 Some(database.get_pool().clone()),
-            ).await.unwrap(),
+            )
+            .await
+            .unwrap(),
         ));
-        
+
         let mut manager = ProcessManager::new_with_environment_manager(
             global_config,
             env_manager,
             Some(database_pool),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let temp_dir = TempDir::new().unwrap();
         let environment_id = temp_dir.path().to_string_lossy().to_string();

@@ -242,10 +242,9 @@ impl EnvironmentRepository {
             r#"
             SELECT id, status 
             FROM environments 
-            WHERE status IN ({})
+            WHERE status IN ({status_placeholders})
             ORDER BY id
-            "#,
-            status_placeholders
+            "#
         );
 
         let mut query_builder = sqlx::query(&query);
@@ -305,7 +304,7 @@ impl EnvironmentRepository {
     pub async fn update_environment_path(&self, env_id: &str, project_path: &str) -> Result<()> {
         let now = Utc::now();
         let config_path = PathBuf::from(project_path).join(".runcept.toml");
-        
+
         sqlx::query(
             r#"
             UPDATE environments 
@@ -349,9 +348,12 @@ impl EnvironmentRepository {
     }
 
     /// Get environments that have been inactive for longer than the specified timeout
-    pub async fn get_inactive_environments(&self, timeout_minutes: i32) -> Result<Vec<Environment>> {
+    pub async fn get_inactive_environments(
+        &self,
+        timeout_minutes: i32,
+    ) -> Result<Vec<Environment>> {
         let cutoff_time = Utc::now() - chrono::Duration::minutes(timeout_minutes as i64);
-        
+
         let rows = sqlx::query(
             r#"
             SELECT id, name, description, project_path, config_path, status, 
@@ -438,7 +440,7 @@ mod tests {
         let project_path = PathBuf::from("/tmp/test_project");
         let now = Utc::now();
 
-        let mut env = Environment {
+        let env = Environment {
             id: env_id.clone(),
             name: "test_env".to_string(),
             project_path: project_path.clone(),
@@ -468,12 +470,16 @@ mod tests {
         assert_eq!(retrieved.status, EnvironmentStatus::Active);
 
         // Update environment status
-        repo.update_environment_status(&env_id, "inactive").await.unwrap();
+        repo.update_environment_status(&env_id, "inactive")
+            .await
+            .unwrap();
         let retrieved = repo.get_environment_by_id(&env_id).await.unwrap().unwrap();
         assert_eq!(retrieved.status, EnvironmentStatus::Inactive);
 
         // Update environment name
-        repo.update_environment_name(&env_id, "updated_name").await.unwrap();
+        repo.update_environment_name(&env_id, "updated_name")
+            .await
+            .unwrap();
         let retrieved = repo.get_environment_by_id(&env_id).await.unwrap().unwrap();
         assert_eq!(retrieved.name, "updated_name");
 
@@ -514,12 +520,18 @@ mod tests {
         repo.insert_environment(&env).await.unwrap();
 
         // Get active environments
-        let active_envs = repo.get_environments_by_status(EnvironmentStatus::Active).await.unwrap();
+        let active_envs = repo
+            .get_environments_by_status(EnvironmentStatus::Active)
+            .await
+            .unwrap();
         assert_eq!(active_envs.len(), 1);
         assert_eq!(active_envs[0].id, env_id);
 
         // Get inactive environments (should be empty)
-        let inactive_envs = repo.get_environments_by_status(EnvironmentStatus::Inactive).await.unwrap();
+        let inactive_envs = repo
+            .get_environments_by_status(EnvironmentStatus::Inactive)
+            .await
+            .unwrap();
         assert_eq!(inactive_envs.len(), 0);
     }
 

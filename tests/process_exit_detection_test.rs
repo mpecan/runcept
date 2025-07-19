@@ -22,7 +22,7 @@ impl ProcessExitTestEnvironment {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let project_dir = temp_dir.path().join("test_project");
         let home_dir = temp_dir.path().join("home");
-        
+
         // Create project and home directories
         fs::create_dir_all(&project_dir).expect("Failed to create project dir");
         fs::create_dir_all(&home_dir).expect("Failed to create home dir");
@@ -118,11 +118,7 @@ mod process_exit_detection_tests {
         test_env.wait_for_daemon();
 
         // Activate environment
-        test_env
-            .runcept_cmd()
-            .arg("activate")
-            .assert()
-            .success();
+        test_env.runcept_cmd().arg("activate").assert().success();
 
         // Start short-lived process
         test_env
@@ -180,11 +176,7 @@ mod process_exit_detection_tests {
         test_env.wait_for_daemon();
 
         // Activate environment
-        test_env
-            .runcept_cmd()
-            .arg("activate")
-            .assert()
-            .success();
+        test_env.runcept_cmd().arg("activate").assert().success();
 
         // Start long-lived process
         test_env
@@ -268,11 +260,7 @@ mod process_exit_detection_tests {
         test_env.wait_for_daemon();
 
         // Activate environment
-        test_env
-            .runcept_cmd()
-            .arg("activate")
-            .assert()
-            .success();
+        test_env.runcept_cmd().arg("activate").assert().success();
 
         // Start both processes
         test_env
@@ -336,11 +324,7 @@ mod process_exit_detection_tests {
         test_env.wait_for_daemon();
 
         // Activate environment
-        test_env
-            .runcept_cmd()
-            .arg("activate")
-            .assert()
-            .success();
+        test_env.runcept_cmd().arg("activate").assert().success();
 
         // Start short-lived process
         test_env

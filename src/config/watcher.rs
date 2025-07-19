@@ -55,7 +55,7 @@ pub struct ConfigWatcherChannels {
 
 impl ConfigWatcher {
     /// Create a new config watcher and return channels for communication
-    pub fn new() -> ConfigWatcherChannels {
+    pub fn create_channels() -> ConfigWatcherChannels {
         let (watch_sender, watch_receiver) = mpsc::channel::<WatchRequest>(100);
         let (event_sender, event_receiver) = mpsc::channel::<ConfigChangeEvent>(100);
 

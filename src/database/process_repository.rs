@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::process::Process;
 use sqlx::{Pool, Row, Sqlite};
 use std::sync::Arc;
 
@@ -87,8 +88,37 @@ impl ProcessRepository {
         Ok(())
     }
 
-    /// Insert a new process into the database
-    pub async fn insert_process(
+    /// Insert a new process into the database using a Process struct
+    pub async fn insert_process(&self, process: &Process) -> Result<()> {
+        let now = chrono::Utc::now();
+        let pid = process.pid.map(|p| p as i64);
+
+        sqlx::query(
+            r#"
+            INSERT INTO processes (
+                id, name, command, working_dir, environment_id, status, pid,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&process.id)
+        .bind(&process.name)
+        .bind(&process.command)
+        .bind(&process.working_dir)
+        .bind(&process.environment_id)
+        .bind(process.status.to_string())
+        .bind(pid)
+        .bind(now)
+        .bind(now)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(())
+    }
+
+    /// Legacy method - Insert a new process into the database (deprecated, use insert_process with Process struct)
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_process_raw(
         &self,
         id: &str,
         name: &str,
@@ -99,7 +129,7 @@ impl ProcessRepository {
         pid: Option<i64>,
     ) -> Result<()> {
         let now = chrono::Utc::now();
-        
+
         sqlx::query(
             r#"
             INSERT INTO processes (
@@ -273,7 +303,11 @@ impl ProcessRepository {
     }
 
     /// Update process working directory
-    pub async fn update_process_working_dir(&self, process_id: &str, working_dir: &str) -> Result<()> {
+    pub async fn update_process_working_dir(
+        &self,
+        process_id: &str,
+        working_dir: &str,
+    ) -> Result<()> {
         let now = chrono::Utc::now();
         sqlx::query(
             r#"
@@ -352,6 +386,9 @@ pub struct ProcessRecord {
 mod tests {
     use super::*;
     use crate::database::Database;
+    use crate::process::{Process, ProcessStatus};
+    use chrono::Utc;
+    use std::collections::HashMap;
     use uuid::Uuid;
 
     /// Helper function to create a test environment in the database
@@ -376,6 +413,35 @@ mod tests {
         .unwrap();
     }
 
+    /// Helper function to create a test Process struct
+    fn create_test_process(
+        process_id: &str,
+        name: &str,
+        command: &str,
+        working_dir: &str,
+        environment_id: &str,
+        status: ProcessStatus,
+        pid: Option<u32>,
+    ) -> Process {
+        Process {
+            id: process_id.to_string(),
+            name: name.to_string(),
+            command: command.to_string(),
+            working_dir: working_dir.to_string(),
+            environment_id: environment_id.to_string(),
+            pid,
+            status,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_activity: None,
+            auto_restart: false,
+            health_check_url: None,
+            health_check_interval: None,
+            depends_on: Vec::new(),
+            env_vars: HashMap::new(),
+        }
+    }
+
     #[tokio::test]
     async fn test_process_repository_crud() {
         let db = Database::new("sqlite::memory:").await.unwrap();
@@ -390,18 +456,17 @@ mod tests {
         // Create test environment first
         create_test_environment(&db, &environment_id).await;
 
-        // Insert process
-        repo.insert_process(
+        // Create and insert process
+        let test_process = create_test_process(
             &process_id,
             "test_process",
             "echo hello",
             "/tmp",
             &environment_id,
-            "running",
+            ProcessStatus::Running,
             Some(1234),
-        )
-        .await
-        .unwrap();
+        );
+        repo.insert_process(&test_process).await.unwrap();
 
         // Get process by ID
         let process = repo.get_process_by_id(&process_id).await.unwrap().unwrap();
@@ -410,7 +475,9 @@ mod tests {
         assert_eq!(process.pid, Some(1234));
 
         // Update process status
-        repo.update_process_status(&process_id, "stopped").await.unwrap();
+        repo.update_process_status(&process_id, "stopped")
+            .await
+            .unwrap();
         let process = repo.get_process_by_id(&process_id).await.unwrap().unwrap();
         assert_eq!(process.status, "stopped");
 
@@ -441,18 +508,17 @@ mod tests {
         // Create test environment first
         create_test_environment(&db, &environment_id).await;
 
-        // Insert running process
-        repo.insert_process(
+        // Create and insert running process
+        let test_process = create_test_process(
             &process_id,
             "test_process",
             "echo hello",
             "/tmp",
             &environment_id,
-            "running",
+            ProcessStatus::Running,
             Some(1234),
-        )
-        .await
-        .unwrap();
+        );
+        repo.insert_process(&test_process).await.unwrap();
 
         // Get running processes
         let running = repo.get_running_processes().await.unwrap();

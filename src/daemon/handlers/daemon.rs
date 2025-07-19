@@ -14,6 +14,7 @@ pub struct DaemonHandles {
     process_manager: Arc<RwLock<ProcessManager>>,
     environment_manager: Arc<RwLock<EnvironmentManager>>,
     inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
+    #[allow(dead_code)]
     current_environment_id: Arc<RwLock<Option<String>>>,
     socket_path: PathBuf,
     start_time: SystemTime,
@@ -92,7 +93,7 @@ impl DaemonHandles {
         }
 
         Ok(DaemonResponse::Success {
-            message: format!("Activity recorded for environment: {}", environment_id),
+            message: format!("Activity recorded for environment: {environment_id}"),
         })
     }
 
@@ -100,10 +101,10 @@ impl DaemonHandles {
     pub async fn request_shutdown(&self) -> Result<DaemonResponse> {
         if let Some(tx) = &self.shutdown_tx {
             tx.send(()).await.map_err(|e| {
-                RunceptError::EnvironmentError(format!("Failed to send shutdown signal: {}", e))
+                RunceptError::EnvironmentError(format!("Failed to send shutdown signal: {e}"))
             })?;
         }
-        
+
         Ok(DaemonResponse::Success {
             message: "Shutdown initiated".to_string(),
         })
