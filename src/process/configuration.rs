@@ -70,23 +70,34 @@ impl ProcessConfigurationManager {
         })
         .await?;
 
-        self.process_repository.insert_process(&Process{
-            id: format!("{environment_id}:{process_name}"),
-            working_dir: process_def.working_dir.unwrap(),
-            name: process_name.clone(),
-            command: process_def.command.clone(),
-            environment_id: environment_id.to_string(),
-            health_check_url: process_def.health_check_url.clone(),
-            health_check_interval: process_def.health_check_interval,
-            auto_restart: process_def.auto_restart.unwrap_or(false),
-            env_vars: process_def.env_vars.clone(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            pid: None,
-            status: crate::process::ProcessStatus::Stopped,
-            last_activity: None,
-            depends_on: vec![]
-        }).await?;
+        let working_dir = if let Some(wd) = &process_def.working_dir {
+            if wd == "." {
+                // Resolve "." to the actual project directory
+                self.get_working_directory(environment_id)
+                    .await?
+                    .to_string_lossy()
+                    .to_string()
+            } else if std::path::Path::new(wd).is_relative() {
+                // Resolve relative paths relative to the project directory
+                let project_dir = self.get_working_directory(environment_id).await?;
+                project_dir.join(wd).to_string_lossy().to_string()
+            } else {
+                // Use absolute path as-is
+                wd.clone()
+            }
+        } else {
+            // Get the default working directory from the environment
+            self.get_working_directory(environment_id)
+                .await?
+                .to_string_lossy()
+                .to_string()
+        };
+        let process = Process::from_definition(
+            &process_def,
+            working_dir,
+            environment_id.to_string()
+        );
+        self.process_repository.insert_process(&process).await?;
 
         info!(
             "Successfully added process '{}' to environment '{}'",

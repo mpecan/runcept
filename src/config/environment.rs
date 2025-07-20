@@ -701,26 +701,27 @@ impl EnvironmentManager {
             if let Some(ref pool) = self.database_pool {
                 let process_repo = ProcessRepository::new(Arc::new(pool.clone()));
                 for process_def in environment.project_config.processes.values() {
-                    let working_dir = process_def
-                        .working_dir
-                        .as_ref()
-                        .unwrap_or(&environment.project_path.to_string_lossy().to_string())
-                        .clone();
+                    let working_dir = if let Some(wd) = &process_def.working_dir {
+                        if wd == "." {
+                            // Resolve "." to the actual project directory
+                            environment.project_path.to_string_lossy().to_string()
+                        } else if std::path::Path::new(wd).is_relative() {
+                            // Resolve relative paths relative to the project directory
+                            environment.project_path.join(wd).to_string_lossy().to_string()
+                        } else {
+                            // Use absolute path as-is
+                            wd.clone()
+                        }
+                    } else {
+                        // Default to project directory
+                        environment.project_path.to_string_lossy().to_string()
+                    };
 
-                    let process = Process::new(
-                        process_def.name.clone(),
-                        process_def.command.clone(),
+                    let process = Process::from_definition(
+                        process_def,
                         working_dir,
                         env_id.to_string(),
                     );
-
-                    // Apply additional process definition settings
-                    let mut process = process;
-                    process.auto_restart = process_def.auto_restart.unwrap_or(false);
-                    process.health_check_url = process_def.health_check_url.clone();
-                    process.health_check_interval = process_def.health_check_interval;
-                    process.depends_on = process_def.depends_on.clone();
-                    process.env_vars = process_def.env_vars.clone();
 
                     // Insert or update the process in database (ignore errors for existing processes)
                     if let Err(e) = process_repo.insert_process(&process).await {

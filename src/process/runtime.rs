@@ -108,21 +108,28 @@ impl ProcessRuntimeManager {
         );
 
         // Check if process is already running by querying the database
-        if let Ok(Some(existing_process)) = self
+        match self
             .process_repository
-            .get_process_by_id(&format!("{environment_id}:{name}"))
+            .get_process_by_name_validated(environment_id, name)
             .await
         {
-            if existing_process.status == "running" || existing_process.status == "starting" {
+            Ok(Some(existing_process)) => {
+                if existing_process.status == "running" || existing_process.status == "starting" {
+                    return Err(RunceptError::ProcessError(format!(
+                        "Process '{name}' is already running in environment '{environment_id}'"
+                    )));
+                }
+            }
+            Ok(None) => {
+                // Process doesn't exist in DB, need to return an error
                 return Err(RunceptError::ProcessError(format!(
-                    "Process '{name}' is already running in environment '{environment_id}'"
+                    "Process '{name}' not found in environment '{environment_id}'"
                 )));
             }
-        } else {
-            // If process doesn't exist in DB, need to return an error
-            return Err(RunceptError::ProcessError(format!(
-                "Process '{name}' not found in environment '{environment_id}'"
-            )));
+            Err(e) => {
+                // Environment validation failed or database error
+                return Err(e);
+            }
         }
 
 
@@ -220,9 +227,9 @@ impl ProcessRuntimeManager {
         self.log_lifecycle_event(name, environment_id, &format!("Stopping process '{name}'"))
             .await;
 
-        // Check if process exists and is running in the database
+        // Check if process exists and is running in the database  
         let process_id = format!("{environment_id}:{name}");
-        let process_status = match self.process_repository.get_process_by_id(&process_id).await {
+        let process_status = match self.process_repository.get_process_by_name_validated(environment_id, name).await {
             Ok(Some(process)) => process.status,
             Ok(None) => {
                 return Err(RunceptError::ProcessError(format!(
@@ -230,9 +237,7 @@ impl ProcessRuntimeManager {
                 )));
             }
             Err(e) => {
-                return Err(RunceptError::ProcessError(format!(
-                    "Failed to query process status for '{process_id}': {e}"
-                )));
+                return Err(e);
             }
         };
 
@@ -512,8 +517,7 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        let process_id = format!("{environment_id}:{name}");
-        match self.process_repository.get_process_by_id(&process_id).await {
+        match self.process_repository.get_process_by_name_validated(environment_id, name).await {
             Ok(Some(process)) => match process.status.as_str() {
                 "running" => Some(ProcessStatus::Running),
                 "stopped" => Some(ProcessStatus::Stopped),
@@ -525,7 +529,7 @@ impl ProcessRuntimeManager {
             },
             Ok(None) => None,
             Err(e) => {
-                error!("Failed to query process status for '{}': {}", process_id, e);
+                error!("Failed to query process status for '{}:{}': {}", environment_id, name, e);
                 None
             }
         }
@@ -543,7 +547,7 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        if let Some(_) = self.process_repository.get_process_by_id(&format!("{environment_id}:{name}")).await? {
+        if let Some(_) = self.process_repository.get_process_by_name_validated(environment_id, name).await? {
             // If process is running, try to read logs from logger
             // First check if the process is currently running
             if let Some(env_handles) = self.process_handles.get(environment_id) {
@@ -643,29 +647,22 @@ impl ProcessRuntimeManager {
         working_dir: &Path,
         environment_id: &str,
     ) -> Result<String> {
-        let mut process = Process::new(
-            process_def.name.clone(),
-            process_def.command.clone(),
+        let mut process = Process::from_definition(
+            process_def,
             working_dir.to_string_lossy().to_string(),
             environment_id.to_string(),
         );
 
-        // Set up environment variables
-        for (key, value) in &process_def.env_vars {
-            process.set_env_var(key.clone(), value.clone());
+        // Override auto-restart with global config if not specified in definition
+        if process_def.auto_restart.is_none() {
+            process.auto_restart = self.global_config.process.auto_restart_on_crash;
         }
 
-        // Set auto-restart from definition or global config
-        process.auto_restart = process_def
-            .auto_restart
-            .unwrap_or(self.global_config.process.auto_restart_on_crash);
-
-        // Set health check if provided
-        if let Some(url) = &process_def.health_check_url {
-            let interval = process_def
-                .health_check_interval
-                .unwrap_or(self.global_config.process.health_check_interval);
-            process.set_health_check(url.clone(), interval);
+        // Set health check interval from global config if URL provided but interval not specified
+        if process_def.health_check_url.is_some() && process_def.health_check_interval.is_none() {
+            if let Some(url) = &process.health_check_url {
+                process.set_health_check(url.clone(), self.global_config.process.health_check_interval);
+            }
         }
 
         // Transition to starting
@@ -725,15 +722,12 @@ impl ProcessRuntimeManager {
             RunceptError::ProcessError(format!("Failed to start process '{}': {}", process.name, e))
         })?;
 
-        // Get the PID
+        // Get the PID and set it on our process struct
         let pid = child.id().map(|p| p as i64);
-
-        // Create process ID (unique identifier)
-        let process_id = format!("{}:{}", environment_id, process_def.name);
-
-        // Set the process ID and PID on our process struct
-        process.id = process_id.clone();
         process.pid = pid.map(|p| p as u32);
+
+        // Process ID is already set by from_definition() method
+        let process_id = process.id.clone();
 
         // Store process in database with "starting" status
         // Check if process record already exists and update it, otherwise insert new one

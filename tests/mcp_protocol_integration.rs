@@ -495,7 +495,7 @@ mod mcp_protocol_tests {
         test_env.init_project().expect("Failed to initialize project");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(None).await.expect("Failed to create MCP client");
+        let client = test_env.create_mcp_client(Some(test_env.project_dir().to_path_buf())).await.expect("Failed to create MCP client");
 
         // First activate environment
         let activate_result = client
@@ -521,8 +521,7 @@ mod mcp_protocol_tests {
                     "name": "test-working-dir",
                     "command": "ls test_marker.txt && sleep 1",
                     "working_dir": ".",
-                    "auto_restart": false,
-                    "environment": test_env.project_dir().to_string_lossy().to_string()
+                    "auto_restart": false
                 })),
             })
             .await;
@@ -535,6 +534,20 @@ mod mcp_protocol_tests {
             !add_response.is_error.unwrap_or(false),
             "add_process should not return error"
         );
+
+        let add_content = add_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        println!("{add_content}");
 
         // Test 2: Start the process to verify it runs in correct directory
         let start_result = client

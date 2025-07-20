@@ -205,6 +205,95 @@ mod tests {
         process.transition_to(ProcessStatus::Crashed);
         assert!(!process.is_healthy_status());
     }
+
+    #[test]
+    fn test_process_from_definition() {
+        use crate::config::ProcessDefinition;
+        use std::collections::HashMap;
+
+        let mut env_vars = HashMap::new();
+        env_vars.insert("NODE_ENV".to_string(), "production".to_string());
+
+        let definition = ProcessDefinition {
+            name: "web-server".to_string(),
+            command: "node server.js".to_string(),
+            working_dir: Some("app".to_string()),
+            auto_restart: Some(true),
+            health_check_url: Some("http://localhost:3000/health".to_string()),
+            health_check_interval: Some(30),
+            depends_on: vec!["database".to_string(), "redis".to_string()],
+            env_vars,
+        };
+
+        let process = Process::from_definition(
+            &definition,
+            "/app".to_string(),
+            "prod-env".to_string(),
+        );
+
+        // Check core fields
+        assert_eq!(process.id, "prod-env:web-server");
+        assert_eq!(process.name, "web-server");
+        assert_eq!(process.command, "node server.js");
+        assert_eq!(process.working_dir, "/app");
+        assert_eq!(process.environment_id, "prod-env");
+
+        // Check defaults
+        assert_eq!(process.status, ProcessStatus::Stopped);
+        assert!(process.pid.is_none());
+
+        // Check mapped fields from definition
+        assert_eq!(process.auto_restart, true);
+        assert_eq!(
+            process.health_check_url,
+            Some("http://localhost:3000/health".to_string())
+        );
+        assert_eq!(process.health_check_interval, Some(30));
+        assert_eq!(process.depends_on.len(), 2);
+        assert!(process.depends_on.contains(&"database".to_string()));
+        assert!(process.depends_on.contains(&"redis".to_string()));
+        assert_eq!(process.env_vars.len(), 1);
+        assert_eq!(
+            process.env_vars.get("NODE_ENV"),
+            Some(&"production".to_string())
+        );
+    }
+
+    #[test]
+    fn test_process_from_definition_with_defaults() {
+        use crate::config::ProcessDefinition;
+        use std::collections::HashMap;
+
+        let definition = ProcessDefinition {
+            name: "minimal-app".to_string(),
+            command: "python app.py".to_string(),
+            working_dir: None,
+            auto_restart: None,
+            health_check_url: None,
+            health_check_interval: None,
+            depends_on: vec![],
+            env_vars: HashMap::new(),
+        };
+
+        let process = Process::from_definition(
+            &definition,
+            "/minimal".to_string(),
+            "test-env".to_string(),
+        );
+
+        assert_eq!(process.id, "test-env:minimal-app");
+        assert_eq!(process.name, "minimal-app");
+        assert_eq!(process.command, "python app.py");
+        assert_eq!(process.working_dir, "/minimal");
+        assert_eq!(process.environment_id, "test-env");
+
+        // Check defaults when not specified in definition
+        assert_eq!(process.auto_restart, false);
+        assert!(process.health_check_url.is_none());
+        assert!(process.health_check_interval.is_none());
+        assert!(process.depends_on.is_empty());
+        assert!(process.env_vars.is_empty());
+    }
 }
 
 use chrono::{DateTime, Utc};
@@ -275,6 +364,34 @@ impl Process {
             health_check_interval: None,
             depends_on: Vec::new(),
             env_vars: HashMap::new(),
+        }
+    }
+
+    /// Create a Process from a ProcessDefinition with proper ID generation
+    /// This is the preferred way to create processes from configuration
+    pub fn from_definition(
+        definition: &crate::config::ProcessDefinition,
+        working_dir: String,
+        environment_id: String,
+    ) -> Self {
+        let now = Utc::now();
+        
+        Self {
+            id: format!("{environment_id}:{}", definition.name),
+            name: definition.name.clone(),
+            command: definition.command.clone(),
+            working_dir,
+            environment_id,
+            pid: None,
+            status: ProcessStatus::Stopped,
+            created_at: now,
+            updated_at: now,
+            last_activity: None,
+            auto_restart: definition.auto_restart.unwrap_or(false),
+            health_check_url: definition.health_check_url.clone(),
+            health_check_interval: definition.health_check_interval,
+            depends_on: definition.depends_on.clone(),
+            env_vars: definition.env_vars.clone(),
         }
     }
 

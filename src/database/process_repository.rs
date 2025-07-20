@@ -220,6 +220,34 @@ impl ProcessRepository {
         }
     }
 
+    /// Get process by environment and name (preferred method)
+    pub async fn get_process_by_name(&self, environment_id: &str, name: &str) -> Result<Option<ProcessRecord>> {
+        let process_id = format!("{environment_id}:{name}");
+        self.get_process_by_id(&process_id).await
+    }
+
+    /// Get process by environment and name with environment validation
+    pub async fn get_process_by_name_validated(&self, environment_id: &str, name: &str) -> Result<Option<ProcessRecord>> {
+        // First validate that the environment exists
+        if !self.validate_environment(environment_id).await? {
+            return Err(crate::error::RunceptError::EnvironmentError(format!(
+                "Environment '{environment_id}' not found"
+            )));
+        }
+        
+        // If environment exists, get the process
+        self.get_process_by_name(environment_id, name).await
+    }
+
+    /// Validate that an environment exists
+    pub async fn validate_environment(&self, environment_id: &str) -> Result<bool> {
+        let row = sqlx::query("SELECT 1 FROM environments WHERE id = ?")
+            .bind(environment_id)
+            .fetch_optional(self.pool.as_ref())
+            .await?;
+        Ok(row.is_some())
+    }
+
     /// Get all processes for a specific environment
     pub async fn get_processes_by_environment(
         &self,
