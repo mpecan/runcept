@@ -4,11 +4,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
+use crate::process::Process;
 
 /// Manages process configurations and interfaces with EnvironmentManager
 pub struct ProcessConfigurationManager {
     pub global_config: crate::config::GlobalConfig,
     pub environment_manager: Arc<RwLock<crate::config::EnvironmentManager>>,
+    pub process_repository: Arc<crate::database::ProcessRepository>,
 }
 
 impl ProcessConfigurationManager {
@@ -16,10 +18,12 @@ impl ProcessConfigurationManager {
     pub fn new(
         global_config: crate::config::GlobalConfig,
         environment_manager: Arc<RwLock<crate::config::EnvironmentManager>>,
+        process_repository: Arc<crate::database::ProcessRepository>,
     ) -> Self {
         Self {
             global_config,
             environment_manager,
+            process_repository,
         }
     }
 
@@ -65,6 +69,24 @@ impl ProcessConfigurationManager {
             Ok(())
         })
         .await?;
+
+        self.process_repository.insert_process(&Process{
+            id: format!("{environment_id}:{process_name}"),
+            working_dir: process_def.working_dir.unwrap(),
+            name: process_name.clone(),
+            command: process_def.command.clone(),
+            environment_id: environment_id.to_string(),
+            health_check_url: process_def.health_check_url.clone(),
+            health_check_interval: process_def.health_check_interval,
+            auto_restart: process_def.auto_restart.unwrap_or(false),
+            env_vars: process_def.env_vars.clone(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            pid: None,
+            status: crate::process::ProcessStatus::Stopped,
+            last_activity: None,
+            depends_on: vec![]
+        }).await?;
 
         info!(
             "Successfully added process '{}' to environment '{}'",

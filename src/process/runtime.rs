@@ -3,9 +3,10 @@ use crate::config::ProcessDefinition;
 use crate::database::ProcessRepository;
 use crate::error::{Result, RunceptError};
 use crate::process::configuration::ProcessConfigurationManager;
+use crate::process::monitor::HealthCheck;
 use crate::process::{LogEntry, Process, ProcessLogger, ProcessStatus};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -63,22 +64,48 @@ impl ProcessRuntimeManager {
         }
     }
 
+    /// Helper method to log lifecycle events to process logs
+    async fn log_lifecycle_event(&self, process_name: &str, environment_id: &str, message: &str) {
+        // Try to get the logger from active handles first
+        if let Some(env_handles) = self.process_handles.get(environment_id) {
+            if let Some(handle) = env_handles.get(process_name) {
+                let mut logger = handle.logger.lock().await;
+                let _ = logger.log_lifecycle(message).await;
+                return;
+            }
+        }
+
+        // If no active handle, create a temporary logger to write the lifecycle event
+        let working_dir = match self
+            .process_configuration_manager
+            .read()
+            .await
+            .get_working_directory(environment_id)
+            .await
+        {
+            Ok(dir) => dir,
+            Err(_) => {
+                error!("Failed to get working directory for lifecycle logging");
+                return;
+            }
+        };
+
+        match ProcessLogger::new(process_name.to_string(), working_dir).await {
+            Ok(mut logger) => {
+                let _ = logger.log_lifecycle(message).await;
+            }
+            Err(e) => {
+                error!("Failed to create logger for lifecycle event: {}", e);
+            }
+        }
+    }
+
     /// Start a process in the specified environment
     pub async fn start_process(&mut self, name: &str, environment_id: &str) -> Result<String> {
         info!(
             "Starting process '{}' in environment '{}'",
             name, environment_id
         );
-
-        // Get process definition and working directory from configuration manager
-        let (process_def, working_dir) = {
-            let config_manager = self.process_configuration_manager.read().await;
-            let process_def = config_manager
-                .get_process_definition(name, environment_id)
-                .await?;
-            let working_dir = config_manager.get_working_directory(environment_id).await?;
-            (process_def, working_dir)
-        };
 
         // Check if process is already running by querying the database
         if let Ok(Some(existing_process)) = self
@@ -91,12 +118,89 @@ impl ProcessRuntimeManager {
                     "Process '{name}' is already running in environment '{environment_id}'"
                 )));
             }
+        } else {
+            // If process doesn't exist in DB, need to return an error
+            return Err(RunceptError::ProcessError(format!(
+                "Process '{name}' not found in environment '{environment_id}'"
+            )));
         }
+
+
+        // Log lifecycle event: starting
+        self.log_lifecycle_event(name, environment_id, &format!("Starting process '{name}'"))
+            .await;
+
+        // Get process definition and working directory from configuration manager
+        let (process_def, working_dir) = {
+            let config_manager = self.process_configuration_manager.read().await;
+            let process_def = config_manager
+                .get_process_definition(name, environment_id)
+                .await?;
+            let working_dir = config_manager.get_working_directory(environment_id).await?;
+            (process_def, working_dir)
+        };
+
 
         // Create and start the process
         let process_id = self
             .start_process_with_definition(&process_def, working_dir.as_path(), environment_id)
             .await?;
+
+        // If process has a health check configured, wait for it to be healthy before returning
+        info!(
+            "Checking if process '{}' has health check configured: {:?}",
+            name, process_def.health_check_url
+        );
+        if process_def.health_check_url.is_some() {
+            info!(
+                "Process '{}' has health check configured: {:?}",
+                name, process_def.health_check_url
+            );
+            self.log_lifecycle_event(
+                name,
+                environment_id,
+                &format!("Waiting for health check to pass for process '{name}'"),
+            )
+            .await;
+
+            match self
+                .wait_for_health_check(&process_def, name, environment_id)
+                .await
+            {
+                Ok(()) => {
+                    self.log_lifecycle_event(
+                        name,
+                        environment_id,
+                        &format!("Health check passed for process '{name}'"),
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    self.log_lifecycle_event(
+                        name,
+                        environment_id,
+                        &format!("Health check failed for process '{name}': {e}"),
+                    )
+                    .await;
+
+                    // Stop the process since health check failed
+                    let _ = self.stop_process(name, environment_id).await;
+                    return Err(e);
+                }
+            }
+        } else {
+            info!(
+                "Process '{}' has no health check configured, skipping health check wait",
+                name
+            );
+        }
+
+        self.log_lifecycle_event(
+            name,
+            environment_id,
+            &format!("Successfully started process '{name}' (PID: {process_id})"),
+        )
+        .await;
 
         info!(
             "Successfully started process '{}' in environment '{}' with ID '{}'",
@@ -111,6 +215,10 @@ impl ProcessRuntimeManager {
             "Stopping process '{}' in environment '{}'",
             name, environment_id
         );
+
+        // Log lifecycle event: stopping
+        self.log_lifecycle_event(name, environment_id, &format!("Stopping process '{name}'"))
+            .await;
 
         // Check if process exists and is running in the database
         let process_id = format!("{environment_id}:{name}");
@@ -297,6 +405,14 @@ impl ProcessRuntimeManager {
             }
         }
 
+        // Log lifecycle event: stopped
+        self.log_lifecycle_event(
+            name,
+            environment_id,
+            &format!("Successfully stopped process '{name}'"),
+        )
+        .await;
+
         info!(
             "Successfully stopped process '{}' in environment '{}'",
             name, environment_id
@@ -311,6 +427,14 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
+        // Log lifecycle event: restarting
+        self.log_lifecycle_event(
+            name,
+            environment_id,
+            &format!("Restarting process '{name}'"),
+        )
+        .await;
+
         // Stop the process first
         self.stop_process(name, environment_id).await?;
 
@@ -322,6 +446,14 @@ impl ProcessRuntimeManager {
 
         // Start the process again
         self.start_process(name, environment_id).await?;
+
+        // Log lifecycle event: restarted
+        self.log_lifecycle_event(
+            name,
+            environment_id,
+            &format!("Successfully restarted process '{name}'"),
+        )
+        .await;
 
         info!(
             "Successfully restarted process '{}' in environment '{}'",
@@ -411,21 +543,28 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        // First check if the process is currently running
-        if let Some(env_handles) = self.process_handles.get(environment_id) {
-            if let Some(handle) = env_handles.get(name) {
-                let logger = handle.logger.lock().await;
-                return logger.read_logs(lines).await;
+        if let Some(_) = self.process_repository.get_process_by_id(&format!("{environment_id}:{name}")).await? {
+            // If process is running, try to read logs from logger
+            // First check if the process is currently running
+            if let Some(env_handles) = self.process_handles.get(environment_id) {
+                if let Some(handle) = env_handles.get(name) {
+                    let logger = handle.logger.lock().await;
+                    return logger.read_logs(lines).await;
+                }
             }
+
+            // Process is not running, try to read logs from filesystem
+            let working_dir = {
+                let config_manager = self.process_configuration_manager.read().await;
+                config_manager.get_working_directory(environment_id).await?
+            };
+
+            crate::process::read_process_logs(name, working_dir.as_path(), lines).await
+        } else {
+            Err(RunceptError::ProcessError(format!(
+                "Process '{name}' not found in environment '{environment_id}'"
+            )))
         }
-
-        // Process is not running, try to read logs from filesystem
-        let working_dir = {
-            let config_manager = self.process_configuration_manager.read().await;
-            config_manager.get_working_directory(environment_id).await?
-        };
-
-        crate::process::read_process_logs(name, working_dir.as_path(), lines).await
     }
 
     /// Clean up finished processes in the specified environment
@@ -532,15 +671,18 @@ impl ProcessRuntimeManager {
         // Transition to starting
         process.transition_to(ProcessStatus::Starting);
 
-        // Parse command and arguments
-        let parts: Vec<&str> = process_def.command.split_whitespace().collect();
+        // Parse command and arguments using proper shell parsing
+        let parts = shlex::split(&process_def.command).ok_or_else(|| {
+            RunceptError::ProcessError(format!("Failed to parse command: {}", process_def.command))
+        })?;
+
         if parts.is_empty() {
             return Err(RunceptError::ProcessError(
                 "Command cannot be empty".to_string(),
             ));
         }
 
-        let program = parts[0];
+        let program = &parts[0];
         let args = &parts[1..];
 
         // Set up working directory
@@ -684,6 +826,19 @@ impl ProcessRuntimeManager {
                 ))
             })?;
 
+        // Log lifecycle event: process spawned successfully
+        if let Ok(mut logger) =
+            ProcessLogger::new(process_def.name.clone(), working_dir.to_path_buf()).await
+        {
+            let _ = logger
+                .log_lifecycle(&format!(
+                    "Process '{}' spawned successfully with PID {}",
+                    process_def.name,
+                    pid.unwrap_or(0)
+                ))
+                .await;
+        }
+
         let process_name = process_def.name.clone();
 
         // Set up shutdown channel
@@ -720,6 +875,7 @@ impl ProcessRuntimeManager {
             shutdown_rx,
             environment_id.to_string(),
             self.exit_notification_tx.clone(),
+            working_dir.to_path_buf(),
         );
 
         Ok(process_id)
@@ -974,6 +1130,90 @@ impl ProcessRuntimeManager {
         Ok(())
     }
 
+    /// Wait for a process health check to pass during startup
+    async fn wait_for_health_check(
+        &self,
+        process_def: &ProcessDefinition,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<()> {
+        let health_url = match &process_def.health_check_url {
+            Some(url) => url,
+            None => return Ok(()), // No health check configured
+        };
+
+        let timeout_secs = self.global_config.process.startup_health_check_timeout;
+        let check_timeout =
+            std::time::Duration::from_secs(self.global_config.process.health_check_timeout as u64);
+
+        info!(
+            "Starting health check for process '{}' with URL '{}', timeout: {}s, check_timeout: {}s",
+            process_name,
+            health_url,
+            timeout_secs,
+            check_timeout.as_secs()
+        );
+
+        let health_check = HealthCheck::from_url(health_url, check_timeout).map_err(|e| {
+            RunceptError::ProcessError(format!(
+                "Invalid health check URL for process '{process_name}': {e}"
+            ))
+        })?;
+
+        let start_time = std::time::Instant::now();
+        let timeout_duration = std::time::Duration::from_secs(timeout_secs as u64);
+
+        // Poll health check until it passes or times out
+        let mut check_count = 0;
+        while start_time.elapsed() < timeout_duration {
+            check_count += 1;
+            info!(
+                "Executing health check #{} for process '{}' (elapsed: {:.2}s)",
+                check_count,
+                process_name,
+                start_time.elapsed().as_secs_f64()
+            );
+
+            match health_check.execute().await {
+                Ok(result) if result.is_healthy => {
+                    info!(
+                        "Health check passed for process '{}' in environment '{}' after {:.2}s (attempt #{})",
+                        process_name,
+                        environment_id,
+                        start_time.elapsed().as_secs_f64(),
+                        check_count
+                    );
+                    return Ok(());
+                }
+                Ok(result) => {
+                    warn!(
+                        "Health check failed for process '{}' in environment '{}' (attempt #{}): {}",
+                        process_name,
+                        environment_id,
+                        check_count,
+                        result
+                            .error_message
+                            .unwrap_or_else(|| "Unknown error".to_string())
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Health check error for process '{}' in environment '{}' (attempt #{}): {}",
+                        process_name, environment_id, check_count, e
+                    );
+                }
+            }
+
+            // Wait a bit before retrying
+            info!("Waiting 500ms before next health check attempt...");
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+
+        Err(RunceptError::ProcessError(format!(
+            "Health check timeout for process '{process_name}' after {timeout_secs} seconds"
+        )))
+    }
+
     /// Spawn a task to capture and log output from a process stream
     fn spawn_output_logging_task<T>(stream: T, logger: Arc<Mutex<ProcessLogger>>, is_stdout: bool)
     where
@@ -1010,6 +1250,7 @@ impl ProcessRuntimeManager {
         mut shutdown_rx: mpsc::Receiver<()>,
         environment_id: String,
         exit_notification_tx: broadcast::Sender<ProcessExitNotification>,
+        working_dir: PathBuf,
     ) {
         tokio::spawn(async move {
             let mut child_guard = child_handle.lock().await;
@@ -1032,6 +1273,16 @@ impl ProcessRuntimeManager {
                                     environment_id: environment_id.clone(),
                                     exit_status,
                                 };
+
+                                if let Ok(mut logger) =
+                                    ProcessLogger::new(process_name.clone(), working_dir.to_path_buf()).await
+                                {
+                                    let _ = logger
+                                        .log_lifecycle(&format!(
+                                            "Process '{process_name}' exited with status {exit_status}"
+                                        ))
+                                        .await;
+                                }
 
                                 if let Err(e) = exit_notification_tx.send(notification) {
                                     error!(

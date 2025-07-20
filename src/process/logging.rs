@@ -22,6 +22,7 @@ pub enum LogLevel {
     Stderr,
     Info,
     Error,
+    Lifecycle, // Process lifecycle events (starting, stopping, etc.)
 }
 
 impl std::fmt::Display for LogLevel {
@@ -31,6 +32,7 @@ impl std::fmt::Display for LogLevel {
             LogLevel::Stderr => write!(f, "STDERR"),
             LogLevel::Info => write!(f, "INFO"),
             LogLevel::Error => write!(f, "ERROR"),
+            LogLevel::Lifecycle => write!(f, "LIFECYCLE"),
         }
     }
 }
@@ -105,6 +107,11 @@ impl ProcessLogger {
     /// Log error message
     pub async fn log_error(&mut self, message: &str) -> Result<()> {
         self.log_entry(LogLevel::Error, message).await
+    }
+
+    /// Log lifecycle event (starting, stopping, etc.)
+    pub async fn log_lifecycle(&mut self, message: &str) -> Result<()> {
+        self.log_entry(LogLevel::Lifecycle, message).await
     }
 
     /// Read log entries from the log file
@@ -208,6 +215,7 @@ impl ProcessLogger {
             "STDERR" => Some(LogLevel::Stderr),
             "INFO" => Some(LogLevel::Info),
             "ERROR" => Some(LogLevel::Error),
+            "LIFECYCLE" => Some(LogLevel::Lifecycle),
             _ => None,
         }
     }
@@ -387,5 +395,49 @@ mod tests {
         // Verify logs directory was created
         assert!(logs_dir.exists());
         assert!(logs_dir.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_logging() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_path_buf();
+
+        let mut logger = ProcessLogger::new("test-lifecycle".to_string(), project_path.clone())
+            .await
+            .unwrap();
+
+        // Log various lifecycle events
+        logger
+            .log_lifecycle("Starting process 'test-lifecycle'")
+            .await
+            .unwrap();
+        logger
+            .log_lifecycle("Process spawned successfully with PID 12345")
+            .await
+            .unwrap();
+        logger.log_lifecycle("Health check passed").await.unwrap();
+        logger
+            .log_lifecycle("Successfully started process")
+            .await
+            .unwrap();
+
+        // Read the log file and verify content
+        let log_content = tokio::fs::read_to_string(&logger.log_file_path)
+            .await
+            .unwrap();
+
+        assert!(log_content.contains("Starting process"));
+        assert!(log_content.contains("Process spawned successfully"));
+        assert!(log_content.contains("Health check passed"));
+        assert!(log_content.contains("\"Lifecycle\""));
+
+        // Test reading logs back
+        let logs = logger.read_logs(None).await.unwrap();
+        assert_eq!(logs.len(), 4);
+
+        for log in &logs {
+            assert!(matches!(log.level, super::LogLevel::Lifecycle));
+            assert!(log.process_name.as_ref().unwrap() == "test-lifecycle");
+        }
     }
 }

@@ -128,25 +128,21 @@ impl DaemonServer {
         // Remove existing socket file if it exists
         if self.config.socket_path.exists() {
             std::fs::remove_file(&self.config.socket_path).map_err(|e| {
-                RunceptError::IoError(std::io::Error::other(
-                    format!(
-                        "Failed to remove existing socket {}: {}",
-                        self.config.socket_path.display(),
-                        e
-                    ),
-                ))
+                RunceptError::IoError(std::io::Error::other(format!(
+                    "Failed to remove existing socket {}: {}",
+                    self.config.socket_path.display(),
+                    e
+                )))
             })?;
         }
 
         // Create Unix socket listener
         let listener = UnixListener::bind(&self.config.socket_path).map_err(|e| {
-            RunceptError::IoError(std::io::Error::other(
-                format!(
-                    "Failed to bind to socket {}: {}",
-                    self.config.socket_path.display(),
-                    e
-                ),
-            ))
+            RunceptError::IoError(std::io::Error::other(format!(
+                "Failed to bind to socket {}: {}",
+                self.config.socket_path.display(),
+                e
+            )))
         })?;
 
         info!(
@@ -211,6 +207,7 @@ impl DaemonServer {
                 // Handle shutdown signal
                 _ = shutdown_rx.recv() => {
                     info!("Received shutdown signal, stopping server");
+                    // Break the loop to initiate shutdown
                     break;
                 }
             }
@@ -218,6 +215,13 @@ impl DaemonServer {
 
         // Cleanup
         self.shutdown().await?;
+        info!("Daemon server has been shut down successfully");
+        // Remove socket file after shutdown
+        if self.config.socket_path.exists() {
+            if let Err(e) = std::fs::remove_file(&self.config.socket_path) {
+                error!("Failed to remove socket file after shutdown: {}", e);
+            }
+        }
         Ok(())
     }
 

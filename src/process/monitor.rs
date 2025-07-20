@@ -524,14 +524,18 @@ impl HealthCheck {
             })
         } else if url.starts_with("cmd://") {
             let command_str = url.strip_prefix("cmd://").unwrap();
-            let parts: Vec<&str> = command_str.split_whitespace().collect();
+            let parts = shlex::split(command_str).ok_or_else(|| {
+                RunceptError::ConfigError(format!(
+                    "Failed to parse health check command: {command_str}"
+                ))
+            })?;
             if parts.is_empty() {
                 return Err(RunceptError::ConfigError(
                     "Command cannot be empty in cmd:// URL".to_string(),
                 ));
             }
 
-            let command = parts[0].to_string();
+            let command = parts[0].clone();
             let args = parts[1..].iter().map(|s| s.to_string()).collect();
 
             Ok(HealthCheck::Command {

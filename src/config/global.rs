@@ -205,6 +205,10 @@ pub struct ProcessConfig {
     pub default_inactivity_timeout: String, // e.g., "30m", "1h", "2h30m"
     #[serde(default = "default_health_check_interval")]
     pub health_check_interval: u32, // seconds
+    #[serde(default = "default_health_check_timeout")]
+    pub health_check_timeout: u32, // seconds - timeout for individual health checks
+    #[serde(default = "default_startup_health_check_timeout")]
+    pub startup_health_check_timeout: u32, // seconds - timeout for startup health check blocking
     #[serde(default = "default_restart_delay")]
     pub restart_delay: u32, // seconds
     #[serde(default = "default_max_restart_attempts")]
@@ -271,6 +275,8 @@ impl Default for ProcessConfig {
         Self {
             default_inactivity_timeout: default_inactivity_timeout(),
             health_check_interval: default_health_check_interval(),
+            health_check_timeout: default_health_check_timeout(),
+            startup_health_check_timeout: default_startup_health_check_timeout(),
             restart_delay: default_restart_delay(),
             max_restart_attempts: default_max_restart_attempts(),
             auto_restart_on_crash: default_auto_restart_on_crash(),
@@ -467,6 +473,12 @@ fn default_inactivity_timeout() -> String {
 }
 fn default_health_check_interval() -> u32 {
     30
+}
+fn default_health_check_timeout() -> u32 {
+    1 // 1 second for individual health checks
+}
+fn default_startup_health_check_timeout() -> u32 {
+    15 // 15 seconds to wait for health check during startup
 }
 fn default_restart_delay() -> u32 {
     5

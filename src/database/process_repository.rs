@@ -88,17 +88,19 @@ impl ProcessRepository {
         Ok(())
     }
 
-    /// Insert a new process into the database using a Process struct
+    /// Insert or replace a process in the database (upsert operation)
+    /// If a process with the same environment_id and name exists, replace it
     pub async fn insert_process(&self, process: &Process) -> Result<()> {
         let now = chrono::Utc::now();
         let pid = process.pid.map(|p| p as i64);
 
         sqlx::query(
             r#"
-            INSERT INTO processes (
+            INSERT OR REPLACE INTO processes (
                 id, name, command, working_dir, environment_id, status, pid,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, last_activity, auto_restart,
+                health_check_url, health_check_interval, depends_on, env_vars
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&process.id)
@@ -110,6 +112,12 @@ impl ProcessRepository {
         .bind(pid)
         .bind(now)
         .bind(now)
+        .bind(process.last_activity)
+        .bind(process.auto_restart)
+        .bind(&process.health_check_url)
+        .bind(process.health_check_interval.map(|i| i as i64))
+        .bind(serde_json::to_string(&process.depends_on).unwrap_or_default())
+        .bind(serde_json::to_string(&process.env_vars).unwrap_or_default())
         .execute(self.pool.as_ref())
         .await?;
 

@@ -211,7 +211,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ProcessStatus {
@@ -261,7 +260,7 @@ impl Process {
         let now = Utc::now();
 
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: format!("{environment_id}:{name}"),
             name,
             command,
             working_dir,

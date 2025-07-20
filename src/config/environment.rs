@@ -316,14 +316,16 @@ use crate::config::{
     ConfigWatcher, ConfigWatcherChannels, GlobalConfig, ProjectConfig, WatchRequest,
     find_project_config,
 };
-use crate::database::QueryManager;
+use crate::database::{ProcessRepository, QueryManager};
 use crate::error::{Result, RunceptError};
+use crate::process::Process;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Sqlite};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EnvironmentStatus {
@@ -694,6 +696,42 @@ impl EnvironmentManager {
             let environment = self.environments.get_mut(env_id).ok_or_else(|| {
                 RunceptError::EnvironmentError(format!("Environment {env_id} not found"))
             })?;
+
+            // Persist process definitions to database
+            if let Some(ref pool) = self.database_pool {
+                let process_repo = ProcessRepository::new(Arc::new(pool.clone()));
+                for process_def in environment.project_config.processes.values() {
+                    let working_dir = process_def
+                        .working_dir
+                        .as_ref()
+                        .unwrap_or(&environment.project_path.to_string_lossy().to_string())
+                        .clone();
+
+                    let process = Process::new(
+                        process_def.name.clone(),
+                        process_def.command.clone(),
+                        working_dir,
+                        env_id.to_string(),
+                    );
+
+                    // Apply additional process definition settings
+                    let mut process = process;
+                    process.auto_restart = process_def.auto_restart.unwrap_or(false);
+                    process.health_check_url = process_def.health_check_url.clone();
+                    process.health_check_interval = process_def.health_check_interval;
+                    process.depends_on = process_def.depends_on.clone();
+                    process.env_vars = process_def.env_vars.clone();
+
+                    // Insert or update the process in database (ignore errors for existing processes)
+                    if let Err(e) = process_repo.insert_process(&process).await {
+                        tracing::debug!(
+                            "Process {} already exists in database: {}",
+                            process.name,
+                            e
+                        );
+                    }
+                }
+            }
 
             // TODO: Start processes in dependency order
             // For now, just mark as active

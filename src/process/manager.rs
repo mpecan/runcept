@@ -1,5 +1,6 @@
 use crate::cli::commands::ProcessInfo;
 use crate::config::ProcessDefinition;
+use crate::database::ProcessRepository;
 use crate::error::{Result, RunceptError};
 use crate::process::LogEntry;
 use crate::process::configuration::ProcessConfigurationManager;
@@ -15,6 +16,7 @@ pub struct ProcessManager {
     pub runtime_manager: Arc<RwLock<ProcessRuntimeManager>>,
     pub global_config: crate::config::GlobalConfig,
     pub environment_manager: Option<Arc<RwLock<crate::config::EnvironmentManager>>>,
+    pub process_repository: Option<Arc<ProcessRepository>>,
 }
 
 impl ProcessManager {
@@ -34,33 +36,40 @@ impl ProcessManager {
         environment_manager: Arc<RwLock<crate::config::EnvironmentManager>>,
         database_pool: Option<Arc<sqlx::SqlitePool>>,
     ) -> Result<Self> {
-        // Create component managers
-        let configuration_manager = Arc::new(RwLock::new(ProcessConfigurationManager::new(
-            global_config.clone(),
-            environment_manager.clone(),
-        )));
-
         // Create process repository - required for DB-first approach
-        let process_repository = match database_pool {
-            Some(pool) => Arc::new(crate::database::ProcessRepository::new(pool)),
-            None => {
-                return Err(RunceptError::DatabaseError(
-                    "Database pool is required for ProcessRuntimeManager".to_string(),
-                ));
-            }
+        let process_repository = database_pool.map(|pool| Arc::new(ProcessRepository::new(pool)));
+        // Create component managers
+        let configuration_manager =if let Some(ref repo) = process_repository {
+            Arc::new(RwLock::new(ProcessConfigurationManager::new(
+                global_config.clone(),
+                environment_manager.clone(),
+                repo.clone()
+            )))
+        } else {
+            return Err(RunceptError::DatabaseError(
+                "Database pool is required for ProcessConfigurationManager".to_string(),
+            ));
         };
 
-        let runtime_manager = Arc::new(RwLock::new(ProcessRuntimeManager::new(
-            configuration_manager.clone(),
-            global_config.clone(),
-            process_repository,
-        )));
+
+        let runtime_manager = if let Some(ref repo) = process_repository {
+            Arc::new(RwLock::new(ProcessRuntimeManager::new(
+                configuration_manager.clone(),
+                global_config.clone(),
+                repo.clone(),
+            )))
+        } else {
+            return Err(RunceptError::DatabaseError(
+                "Database pool is required for ProcessRuntimeManager".to_string(),
+            ));
+        };
 
         Ok(Self {
             configuration_manager,
             runtime_manager,
             global_config,
             environment_manager: Some(environment_manager),
+            process_repository,
         })
     }
 
@@ -196,20 +205,46 @@ impl ProcessManager {
             runtime_manager.process_exit_notifications().await?;
         }
 
-        // Get configured processes from environment
-        let configured_processes = if let Some(env_manager) = &self.environment_manager {
-            let env_manager_guard = env_manager.read().await;
-            if let Some(env) = env_manager_guard.get_environment(environment_id) {
-                env.project_config.processes.clone()
-            } else {
-                return Err(RunceptError::EnvironmentError(format!(
-                    "Environment '{environment_id}' not found"
-                )));
-            }
+        // Get configured processes from database using ProcessRepository
+        let configured_processes = if let Some(ref process_repo) = self.process_repository {
+            process_repo
+                .get_processes_by_environment(environment_id)
+                .await?
         } else {
-            return Err(RunceptError::EnvironmentError(
-                "No environment manager available".to_string(),
-            ));
+            // Fallback to environment manager for backward compatibility
+            if let Some(env_manager) = &self.environment_manager {
+                let env_manager_guard = env_manager.read().await;
+                if let Some(env) = env_manager_guard.get_environment(environment_id) {
+                    // Convert ProcessDefinition to ProcessRecord-like data for consistency
+                    env.project_config
+                        .processes
+                        .values()
+                        .map(|def| crate::database::ProcessRecord {
+                            id: format!("{}-{}", environment_id, def.name),
+                            name: def.name.clone(),
+                            command: def.command.clone(),
+                            working_dir: def
+                                .working_dir
+                                .as_ref()
+                                .unwrap_or(&env.project_path.to_string_lossy().to_string())
+                                .clone(),
+                            environment_id: environment_id.to_string(),
+                            status: "configured".to_string(),
+                            pid: None,
+                            created_at: chrono::Utc::now(),
+                            updated_at: chrono::Utc::now(),
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    return Err(RunceptError::EnvironmentError(format!(
+                        "Environment '{environment_id}' not found"
+                    )));
+                }
+            } else {
+                return Err(RunceptError::EnvironmentError(
+                    "No process repository or environment manager available".to_string(),
+                ));
+            }
         };
 
         // Get running processes from runtime manager
@@ -227,23 +262,28 @@ impl ProcessManager {
 
         // Build process list from configured processes, showing their current status
         let processes: Vec<ProcessInfo> = configured_processes
-            .keys()
-            .map(|name| {
-                if let Some(running_process) = running_processes_map.get(name) {
+            .iter()
+            .map(|process_record| {
+                if let Some(running_process) = running_processes_map.get(&process_record.name) {
                     // Process is running, use actual status
                     (*running_process).clone()
                 } else {
                     // Process is configured but not running
                     ProcessInfo {
-                        id: format!("{name}-configured"),
-                        name: name.clone(),
-                        status: "configured".to_string(),
-                        pid: None,
+                        id: process_record.id.clone(),
+                        name: process_record.name.clone(),
+                        status: process_record.status.clone(),
+                        pid: process_record.pid.map(|p| p as u32),
                         uptime: None,
-                        environment: environment_id.to_string(),
+                        environment: process_record.environment_id.clone(),
                         health_status: None,
                         restart_count: 0,
-                        last_activity: None,
+                        last_activity: Some(
+                            process_record
+                                .updated_at
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string(),
+                        ),
                     }
                 }
             })
