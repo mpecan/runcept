@@ -130,7 +130,10 @@ async fn test_concurrent_daemon_operations() {
 
     // Ensure daemon is started explicitly
     if !test_env.is_daemon_running() {
-        test_env.start_daemon().await.expect("Failed to start daemon for concurrent test");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon for concurrent test");
     }
 
     // Test concurrent status checks using new method

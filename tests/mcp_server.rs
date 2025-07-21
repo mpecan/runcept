@@ -28,8 +28,8 @@ async fn test_mcp_server_starts_and_responds() {
 
     // Activate environment
     test_env.assert_cmd_success(
-        &["activate", &test_env.project_dir().to_string_lossy()], 
-        "activated"
+        &["activate", &test_env.project_dir().to_string_lossy()],
+        "activated",
     );
 
     // Start MCP server in background using centralized helper
@@ -85,8 +85,8 @@ async fn test_mcp_server_with_environment_context() {
 
     // Activate environment
     test_env.assert_cmd_success(
-        &["activate", &test_env.project_dir().to_string_lossy()], 
-        "activated"
+        &["activate", &test_env.project_dir().to_string_lossy()],
+        "activated",
     );
 
     // Start some processes to have context for MCP server
@@ -218,8 +218,8 @@ async fn test_mcp_server_handles_invalid_input() {
 
     // Activate environment
     test_env.assert_cmd_success(
-        &["activate", &test_env.project_dir().to_string_lossy()], 
-        "activated"
+        &["activate", &test_env.project_dir().to_string_lossy()],
+        "activated",
     );
 
     // Start MCP server using centralized helper
@@ -290,8 +290,8 @@ async fn test_mcp_server_concurrent_access() {
 
     // Activate environment using centralized method
     test_env.assert_cmd_success(
-        &["activate", &test_env.project_dir().to_string_lossy()], 
-        "activated"
+        &["activate", &test_env.project_dir().to_string_lossy()],
+        "activated",
     );
 
     // Start multiple MCP server instances to test concurrent access
@@ -356,13 +356,13 @@ async fn test_mcp_server_concurrent_access() {
         all_succeeded,
         mcp_processes.len()
     );
-    
+
     // At minimum, we should be able to start some processes
     assert!(
         !mcp_processes.is_empty(),
         "Should be able to start at least some MCP server processes"
     );
-    
+
     // If processes exit, they should exit gracefully, or be expected to conflict
     // For now, we'll accept that multiple MCP servers might not be able to run concurrently
     println!("MCP concurrent access test completed - concurrent access may be limited by design");

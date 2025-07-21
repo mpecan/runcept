@@ -174,8 +174,8 @@ async fn test_init_generated_config_is_valid_and_activatable() {
 
     // Try to activate the generated configuration
     test_env.assert_cmd_success(
-        &["activate", &test_env.project_dir().to_string_lossy()], 
-        "activated"
+        &["activate", &test_env.project_dir().to_string_lossy()],
+        "activated",
     );
 
     // Verify we can check status after activation
