@@ -221,20 +221,28 @@ impl ProcessRepository {
     }
 
     /// Get process by environment and name (preferred method)
-    pub async fn get_process_by_name(&self, environment_id: &str, name: &str) -> Result<Option<ProcessRecord>> {
+    pub async fn get_process_by_name(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<Option<ProcessRecord>> {
         let process_id = format!("{environment_id}:{name}");
         self.get_process_by_id(&process_id).await
     }
 
     /// Get process by environment and name with environment validation
-    pub async fn get_process_by_name_validated(&self, environment_id: &str, name: &str) -> Result<Option<ProcessRecord>> {
+    pub async fn get_process_by_name_validated(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<Option<ProcessRecord>> {
         // First validate that the environment exists
         if !self.validate_environment(environment_id).await? {
             return Err(crate::error::RunceptError::EnvironmentError(format!(
                 "Environment '{environment_id}' not found"
             )));
         }
-        
+
         // If environment exists, get the process
         self.get_process_by_name(environment_id, name).await
     }

@@ -2,9 +2,7 @@
 
 mod common;
 
-use common::{
-    environment::{RunceptTestEnvironment, TestConfig},
-};
+use common::environment::{RunceptTestEnvironment, TestConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
@@ -12,7 +10,7 @@ use tokio::time::sleep;
 
 /// Comprehensive MCP protocol integration tests
 /// Tests the MCP server with real daemon communication, protocol interactions, and auto-configuration
-/// 
+///
 /// These tests validate the same functionality as the old mcp_integration_test.rs but using
 /// the new centralized test environment.
 
@@ -38,9 +36,7 @@ mod mcp_protocol_tests {
             })
             .await;
 
-            Self {
-                test_env,
-            }
+            Self { test_env }
         }
 
         async fn start_daemon(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -60,19 +56,23 @@ mod mcp_protocol_tests {
             Err("Daemon failed to start within timeout".into())
         }
 
-        async fn create_mcp_client(&self, working_directory: Option<PathBuf>) -> Result<RunningService<RoleClient, ()>, Box<dyn std::error::Error>> {
+        async fn create_mcp_client(
+            &self,
+            working_directory: Option<PathBuf>,
+        ) -> Result<RunningService<RoleClient, ()>, Box<dyn std::error::Error>> {
             let binary_path = self.test_env.binary_path();
-            let client = ().serve(
-                TokioChildProcess::new(Command::new(binary_path).configure(|cmd| {
-                    cmd.arg("mcp").env("HOME", self.test_env.home_dir());
-                    if let Some(dir) = working_directory {
-                        cmd.current_dir(dir);
-                    } else {
-                        cmd.current_dir(self.test_env.project_dir());
-                    }
-                }))?,
-            )
-            .await?;
+            let client = ()
+                .serve(TokioChildProcess::new(
+                    Command::new(binary_path).configure(|cmd| {
+                        cmd.arg("mcp").env("HOME", self.test_env.home_dir());
+                        if let Some(dir) = working_directory {
+                            cmd.current_dir(dir);
+                        } else {
+                            cmd.current_dir(self.test_env.project_dir());
+                        }
+                    }),
+                )?)
+                .await?;
             Ok(client)
         }
 
@@ -94,7 +94,11 @@ mod mcp_protocol_tests {
                 .env("HOME", self.test_env.home_dir());
             let output = cmd.output()?;
             if !output.status.success() {
-                return Err(format!("Init command failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+                return Err(format!(
+                    "Init command failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )
+                .into());
             }
             Ok(())
         }
@@ -104,12 +108,18 @@ mod mcp_protocol_tests {
     #[tokio::test]
     async fn test_mcp_server_startup() {
         let mut test_env = McpTestEnvironment::new("mcp-server-startup").await;
-        
+
         // Start daemon first
-        test_env.start_daemon().await.expect("Failed to start daemon");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(None).await.expect("Failed to create MCP client");
+        let client = test_env
+            .create_mcp_client(None)
+            .await
+            .expect("Failed to create MCP client");
 
         let result = client.service().get_info();
         assert_eq!(
@@ -129,12 +139,18 @@ mod mcp_protocol_tests {
     #[tokio::test]
     async fn test_mcp_list_tools() {
         let mut test_env = McpTestEnvironment::new("mcp-list-tools").await;
-        
+
         // Start daemon first
-        test_env.start_daemon().await.expect("Failed to start daemon");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(None).await.expect("Failed to create MCP client");
+        let client = test_env
+            .create_mcp_client(None)
+            .await
+            .expect("Failed to create MCP client");
 
         // List available tools
         let tools_result = client.peer().list_tools(None).await;
@@ -184,12 +200,18 @@ mod mcp_protocol_tests {
     #[tokio::test]
     async fn test_mcp_auto_configuration() {
         let mut test_env = McpTestEnvironment::new("mcp-auto-config").await;
-        
+
         // Start daemon first
-        test_env.start_daemon().await.expect("Failed to start daemon");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(None).await.expect("Failed to create MCP client");
+        let client = test_env
+            .create_mcp_client(None)
+            .await
+            .expect("Failed to create MCP client");
 
         // Test activate_environment with auto-configuration
         // This should create a .runcept.toml file automatically
@@ -245,15 +267,23 @@ mod mcp_protocol_tests {
     #[tokio::test]
     async fn test_mcp_tools_workflow() {
         let mut test_env = McpTestEnvironment::new("mcp-tools-workflow").await;
-        
+
         // Start daemon first
-        test_env.start_daemon().await.expect("Failed to start daemon");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
 
         // Initialize project
-        test_env.init_project().expect("Failed to initialize project");
+        test_env
+            .init_project()
+            .expect("Failed to initialize project");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(None).await.expect("Failed to create MCP client");
+        let client = test_env
+            .create_mcp_client(None)
+            .await
+            .expect("Failed to create MCP client");
 
         // Test sequence: activate -> get status -> start process -> list processes
         let test_cases = vec![
@@ -307,15 +337,23 @@ mod mcp_protocol_tests {
     #[tokio::test]
     async fn test_mcp_process_management_tools() {
         let mut test_env = McpTestEnvironment::new("mcp-process-mgmt").await;
-        
+
         // Start daemon first
-        test_env.start_daemon().await.expect("Failed to start daemon");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
 
         // Initialize project
-        test_env.init_project().expect("Failed to initialize project");
+        test_env
+            .init_project()
+            .expect("Failed to initialize project");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(None).await.expect("Failed to create MCP client");
+        let client = test_env
+            .create_mcp_client(None)
+            .await
+            .expect("Failed to create MCP client");
 
         // First activate environment
         let activate_result = client
@@ -405,15 +443,23 @@ mod mcp_protocol_tests {
     #[tokio::test]
     async fn test_mcp_process_management_with_environment_override() {
         let mut test_env = McpTestEnvironment::new("mcp-env-override").await;
-        
+
         // Start daemon first
-        test_env.start_daemon().await.expect("Failed to start daemon");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
 
         // Initialize project
-        test_env.init_project().expect("Failed to initialize project");
+        test_env
+            .init_project()
+            .expect("Failed to initialize project");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(None).await.expect("Failed to create MCP client");
+        let client = test_env
+            .create_mcp_client(None)
+            .await
+            .expect("Failed to create MCP client");
 
         // First activate environment
         let activate_result = client
@@ -483,19 +529,27 @@ mod mcp_protocol_tests {
     #[tokio::test]
     async fn test_mcp_working_directory_resolution() {
         let mut test_env = McpTestEnvironment::new("mcp-working-dir").await;
-        
+
         // Start daemon first
-        test_env.start_daemon().await.expect("Failed to start daemon");
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
 
         // Create a test file in the project directory to verify working directory
         let test_file_path = test_env.project_dir().join("test_marker.txt");
         std::fs::write(&test_file_path, "working_directory_test").unwrap();
 
         // Initialize project
-        test_env.init_project().expect("Failed to initialize project");
+        test_env
+            .init_project()
+            .expect("Failed to initialize project");
 
         // Create MCP client
-        let client = test_env.create_mcp_client(Some(test_env.project_dir().to_path_buf())).await.expect("Failed to create MCP client");
+        let client = test_env
+            .create_mcp_client(Some(test_env.project_dir().to_path_buf()))
+            .await
+            .expect("Failed to create MCP client");
 
         // First activate environment
         let activate_result = client

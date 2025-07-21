@@ -1,10 +1,10 @@
 use crate::config::ProcessDefinition;
 use crate::error::{Result, RunceptError};
+use crate::process::Process;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
-use crate::process::Process;
 
 /// Manages process configurations and interfaces with EnvironmentManager
 pub struct ProcessConfigurationManager {
@@ -92,11 +92,8 @@ impl ProcessConfigurationManager {
                 .to_string_lossy()
                 .to_string()
         };
-        let process = Process::from_definition(
-            &process_def,
-            working_dir,
-            environment_id.to_string()
-        );
+        let process =
+            Process::from_definition(&process_def, working_dir, environment_id.to_string());
         self.process_repository.insert_process(&process).await?;
 
         info!(

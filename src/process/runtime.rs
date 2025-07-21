@@ -132,7 +132,6 @@ impl ProcessRuntimeManager {
             }
         }
 
-
         // Log lifecycle event: starting
         self.log_lifecycle_event(name, environment_id, &format!("Starting process '{name}'"))
             .await;
@@ -146,7 +145,6 @@ impl ProcessRuntimeManager {
             let working_dir = config_manager.get_working_directory(environment_id).await?;
             (process_def, working_dir)
         };
-
 
         // Create and start the process
         let process_id = self
@@ -227,9 +225,13 @@ impl ProcessRuntimeManager {
         self.log_lifecycle_event(name, environment_id, &format!("Stopping process '{name}'"))
             .await;
 
-        // Check if process exists and is running in the database  
+        // Check if process exists and is running in the database
         let process_id = format!("{environment_id}:{name}");
-        let process_status = match self.process_repository.get_process_by_name_validated(environment_id, name).await {
+        let process_status = match self
+            .process_repository
+            .get_process_by_name_validated(environment_id, name)
+            .await
+        {
             Ok(Some(process)) => process.status,
             Ok(None) => {
                 return Err(RunceptError::ProcessError(format!(
@@ -517,7 +519,11 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        match self.process_repository.get_process_by_name_validated(environment_id, name).await {
+        match self
+            .process_repository
+            .get_process_by_name_validated(environment_id, name)
+            .await
+        {
             Ok(Some(process)) => match process.status.as_str() {
                 "running" => Some(ProcessStatus::Running),
                 "stopped" => Some(ProcessStatus::Stopped),
@@ -529,7 +535,10 @@ impl ProcessRuntimeManager {
             },
             Ok(None) => None,
             Err(e) => {
-                error!("Failed to query process status for '{}:{}': {}", environment_id, name, e);
+                error!(
+                    "Failed to query process status for '{}:{}': {}",
+                    environment_id, name, e
+                );
                 None
             }
         }
@@ -547,7 +556,12 @@ impl ProcessRuntimeManager {
             name, environment_id
         );
 
-        if let Some(_) = self.process_repository.get_process_by_name_validated(environment_id, name).await? {
+        if self
+            .process_repository
+            .get_process_by_name_validated(environment_id, name)
+            .await?
+            .is_some()
+        {
             // If process is running, try to read logs from logger
             // First check if the process is currently running
             if let Some(env_handles) = self.process_handles.get(environment_id) {
@@ -661,7 +675,10 @@ impl ProcessRuntimeManager {
         // Set health check interval from global config if URL provided but interval not specified
         if process_def.health_check_url.is_some() && process_def.health_check_interval.is_none() {
             if let Some(url) = &process.health_check_url {
-                process.set_health_check(url.clone(), self.global_config.process.health_check_interval);
+                process.set_health_check(
+                    url.clone(),
+                    self.global_config.process.health_check_interval,
+                );
             }
         }
 

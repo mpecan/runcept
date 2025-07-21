@@ -707,7 +707,11 @@ impl EnvironmentManager {
                             environment.project_path.to_string_lossy().to_string()
                         } else if std::path::Path::new(wd).is_relative() {
                             // Resolve relative paths relative to the project directory
-                            environment.project_path.join(wd).to_string_lossy().to_string()
+                            environment
+                                .project_path
+                                .join(wd)
+                                .to_string_lossy()
+                                .to_string()
                         } else {
                             // Use absolute path as-is
                             wd.clone()
@@ -717,11 +721,8 @@ impl EnvironmentManager {
                         environment.project_path.to_string_lossy().to_string()
                     };
 
-                    let process = Process::from_definition(
-                        process_def,
-                        working_dir,
-                        env_id.to_string(),
-                    );
+                    let process =
+                        Process::from_definition(process_def, working_dir, env_id.to_string());
 
                     // Insert or update the process in database (ignore errors for existing processes)
                     if let Err(e) = process_repo.insert_process(&process).await {

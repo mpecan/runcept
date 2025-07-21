@@ -39,18 +39,17 @@ impl ProcessManager {
         // Create process repository - required for DB-first approach
         let process_repository = database_pool.map(|pool| Arc::new(ProcessRepository::new(pool)));
         // Create component managers
-        let configuration_manager =if let Some(ref repo) = process_repository {
+        let configuration_manager = if let Some(ref repo) = process_repository {
             Arc::new(RwLock::new(ProcessConfigurationManager::new(
                 global_config.clone(),
                 environment_manager.clone(),
-                repo.clone()
+                repo.clone(),
             )))
         } else {
             return Err(RunceptError::DatabaseError(
                 "Database pool is required for ProcessConfigurationManager".to_string(),
             ));
         };
-
 
         let runtime_manager = if let Some(ref repo) = process_repository {
             Arc::new(RwLock::new(ProcessRuntimeManager::new(
@@ -586,7 +585,6 @@ mod tests {
         match result {
             Ok(_) => {
                 // Success - component delegation is working
-                assert!(true);
             }
             Err(e) => {
                 // Expected error due to environment setup - that's okay for this test

@@ -3,8 +3,8 @@ mod common;
 use assert_cmd::Command;
 use common::{
     assertions::*,
-    fixtures::*,
     environment::{RunceptTestEnvironment, TestConfig},
+    fixtures::*,
 };
 use std::time::Duration;
 

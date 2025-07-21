@@ -225,11 +225,8 @@ mod tests {
             env_vars,
         };
 
-        let process = Process::from_definition(
-            &definition,
-            "/app".to_string(),
-            "prod-env".to_string(),
-        );
+        let process =
+            Process::from_definition(&definition, "/app".to_string(), "prod-env".to_string());
 
         // Check core fields
         assert_eq!(process.id, "prod-env:web-server");
@@ -243,7 +240,7 @@ mod tests {
         assert!(process.pid.is_none());
 
         // Check mapped fields from definition
-        assert_eq!(process.auto_restart, true);
+        assert!(process.auto_restart);
         assert_eq!(
             process.health_check_url,
             Some("http://localhost:3000/health".to_string())
@@ -275,11 +272,8 @@ mod tests {
             env_vars: HashMap::new(),
         };
 
-        let process = Process::from_definition(
-            &definition,
-            "/minimal".to_string(),
-            "test-env".to_string(),
-        );
+        let process =
+            Process::from_definition(&definition, "/minimal".to_string(), "test-env".to_string());
 
         assert_eq!(process.id, "test-env:minimal-app");
         assert_eq!(process.name, "minimal-app");
@@ -288,7 +282,7 @@ mod tests {
         assert_eq!(process.environment_id, "test-env");
 
         // Check defaults when not specified in definition
-        assert_eq!(process.auto_restart, false);
+        assert!(!process.auto_restart);
         assert!(process.health_check_url.is_none());
         assert!(process.health_check_interval.is_none());
         assert!(process.depends_on.is_empty());
@@ -375,7 +369,7 @@ impl Process {
         environment_id: String,
     ) -> Self {
         let now = Utc::now();
-        
+
         Self {
             id: format!("{environment_id}:{}", definition.name),
             name: definition.name.clone(),
