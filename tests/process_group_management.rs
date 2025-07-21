@@ -1,7 +1,7 @@
 mod common;
 
 use common::{
-    assertions::*,
+    assertions::assert_process_status,
     environment::{RunceptTestEnvironment, TestConfig},
 };
 use nix::sys::signal;
@@ -238,9 +238,7 @@ auto_restart = false
     );
 
     // Stop the parent process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["stop", "nested-parent"]);
-    assert_success_with_output(cmd, "stopped");
+    test_env.assert_cmd_success(&["stop", "nested-parent"], "stopped");
 
     // Wait for cleanup
     tokio::time::sleep(Duration::from_millis(2000)).await;

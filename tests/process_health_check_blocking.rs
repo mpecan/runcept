@@ -1,7 +1,7 @@
 mod common;
 
 use common::{
-    assertions::*,
+    assertions::{assert_health_check_timeout, assert_process_status},
     environment::{RunceptTestEnvironment, TestConfig},
     fixtures::*,
 };
@@ -88,9 +88,7 @@ async fn test_successful_health_check_allows_start_to_complete() {
     // Start the process - this should complete quickly once health check passes
     let start_time = std::time::Instant::now();
 
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "command-process"]);
-    assert_success_with_output(cmd, "started");
+    test_env.assert_cmd_success(&["start", "command-process"], "started");
 
     let elapsed = start_time.elapsed();
 
@@ -102,7 +100,7 @@ async fn test_successful_health_check_allows_start_to_complete() {
     );
 
     // Process should be running
-    let mut cmd = test_env.runcept_cmd();
+    let cmd = test_env.runcept_cmd();
     assert_process_status(
         cmd,
         "command-\
@@ -136,9 +134,7 @@ async fn test_process_without_health_check_starts_immediately() {
     // Start the process - this should complete very quickly since no health check
     let start_time = std::time::Instant::now();
 
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "test-process"]);
-    assert_success_with_output(cmd, "started");
+    test_env.assert_cmd_success(&["start", "test-process"], "started");
 
     let elapsed = start_time.elapsed();
 
