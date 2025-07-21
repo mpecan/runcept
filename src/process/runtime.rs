@@ -251,7 +251,7 @@ impl ProcessRuntimeManager {
 
         // Update process status to stopping in database
         self.process_repository
-            .update_process_status(&process_id, "stopping")
+            .update_process_status(environment_id, name, "stopping")
             .await
             .map_err(|e| {
                 RunceptError::ProcessError(format!(
@@ -324,7 +324,10 @@ impl ProcessRuntimeManager {
         // If we don't have a handle or couldn't kill via handle, try to kill by PID
         if !process_killed {
             // Get the process from database to find its PID
-            if let Ok(Some(process)) = self.process_repository.get_process_by_id(&process_id).await
+            if let Ok(Some(process)) = self
+                .process_repository
+                .get_process_by_name(environment_id, name)
+                .await
             {
                 if let Some(pid) = process.pid {
                     warn!(
@@ -353,7 +356,7 @@ impl ProcessRuntimeManager {
         if process_killed {
             // Update process status to stopped in database
             self.process_repository
-                .update_process_status(&process_id, "stopped")
+                .update_process_status(environment_id, name, "stopped")
                 .await
                 .map_err(|e| {
                     RunceptError::ProcessError(format!(
@@ -363,7 +366,7 @@ impl ProcessRuntimeManager {
 
             // Clear the PID in database
             self.process_repository
-                .clear_process_pid(&process_id)
+                .clear_process_pid(environment_id, name)
                 .await
                 .map_err(|e| {
                     RunceptError::ProcessError(format!("Failed to clear process PID: {e}"))
@@ -371,43 +374,48 @@ impl ProcessRuntimeManager {
         } else {
             // If we couldn't kill the process, don't mark it as stopped
             // Check if the process is actually still alive
-            if let Ok(Some(process)) = self.process_repository.get_process_by_id(&process_id).await
-            {
-                if let Some(pid) = process.pid {
-                    if Self::is_process_alive(pid as u32) {
-                        return Err(RunceptError::ProcessError(format!(
-                            "Failed to stop process '{name}' in environment '{environment_id}': process is still running with PID {pid}"
-                        )));
+            if let Some((env_id, name)) = process_id.split_once(':') {
+                if let Ok(Some(process)) = self
+                    .process_repository
+                    .get_process_by_name(env_id, name)
+                    .await
+                {
+                    if let Some(pid) = process.pid {
+                        if Self::is_process_alive(pid as u32) {
+                            return Err(RunceptError::ProcessError(format!(
+                                "Failed to stop process '{name}' in environment '{env_id}': process is still running with PID {pid}"
+                            )));
+                        } else {
+                            // Process is not alive anymore, safe to mark as stopped
+                            self.process_repository
+                                .update_process_status(env_id, name, "stopped")
+                                .await
+                                .map_err(|e| {
+                                    RunceptError::ProcessError(format!(
+                                        "Failed to update process status to stopped: {e}"
+                                    ))
+                                })?;
+
+                            self.process_repository
+                                .clear_process_pid(env_id, name)
+                                .await
+                                .map_err(|e| {
+                                    RunceptError::ProcessError(format!(
+                                        "Failed to clear process PID: {e}"
+                                    ))
+                                })?;
+                        }
                     } else {
-                        // Process is not alive anymore, safe to mark as stopped
+                        // No PID, safe to mark as stopped
                         self.process_repository
-                            .update_process_status(&process_id, "stopped")
+                            .update_process_status(env_id, name, "stopped")
                             .await
                             .map_err(|e| {
                                 RunceptError::ProcessError(format!(
                                     "Failed to update process status to stopped: {e}"
                                 ))
                             })?;
-
-                        self.process_repository
-                            .clear_process_pid(&process_id)
-                            .await
-                            .map_err(|e| {
-                                RunceptError::ProcessError(format!(
-                                    "Failed to clear process PID: {e}"
-                                ))
-                            })?;
                     }
-                } else {
-                    // No PID, safe to mark as stopped
-                    self.process_repository
-                        .update_process_status(&process_id, "stopped")
-                        .await
-                        .map_err(|e| {
-                            RunceptError::ProcessError(format!(
-                                "Failed to update process status to stopped: {e}"
-                            ))
-                        })?;
                 }
             }
         }
@@ -748,12 +756,14 @@ impl ProcessRuntimeManager {
 
         // Store process in database with "starting" status
         // Check if process record already exists and update it, otherwise insert new one
-        if let Ok(Some(_existing_process)) =
-            self.process_repository.get_process_by_id(&process_id).await
+        if let Ok(Some(_existing_process)) = self
+            .process_repository
+            .get_process_by_name(environment_id, &process_def.name)
+            .await
         {
             // Update existing process record
             self.process_repository
-                .update_process_command(&process_id, &process_def.command)
+                .update_process_command(environment_id, &process_def.name, &process_def.command)
                 .await
                 .map_err(|e| {
                     RunceptError::ProcessError(format!(
@@ -763,7 +773,11 @@ impl ProcessRuntimeManager {
                 })?;
 
             self.process_repository
-                .update_process_working_dir(&process_id, &working_dir.to_string_lossy())
+                .update_process_working_dir(
+                    environment_id,
+                    &process_def.name,
+                    &working_dir.to_string_lossy(),
+                )
                 .await
                 .map_err(|e| {
                     RunceptError::ProcessError(format!(
@@ -773,7 +787,7 @@ impl ProcessRuntimeManager {
                 })?;
 
             self.process_repository
-                .update_process_status(&process_id, "starting")
+                .update_process_status(environment_id, &process_def.name, "starting")
                 .await
                 .map_err(|e| {
                     RunceptError::ProcessError(format!(
@@ -784,7 +798,7 @@ impl ProcessRuntimeManager {
 
             if let Some(pid) = pid {
                 self.process_repository
-                    .set_process_pid(&process_id, pid)
+                    .set_process_pid(environment_id, &process_def.name, pid)
                     .await
                     .map_err(|e| {
                         RunceptError::ProcessError(format!(
@@ -828,7 +842,7 @@ impl ProcessRuntimeManager {
 
         // Update process status to running in database
         self.process_repository
-            .update_process_status(&process_id, "running")
+            .update_process_status(environment_id, &process_def.name, "running")
             .await
             .map_err(|e| {
                 RunceptError::ProcessError(format!(
@@ -992,8 +1006,8 @@ impl ProcessRuntimeManager {
                 notification.process_name, notification.environment_id
             );
 
-            // Create process ID
-            let process_id = format!(
+            // Create process ID (not used but kept for debugging/logging purposes)
+            let _process_id = format!(
                 "{}:{}",
                 notification.environment_id, notification.process_name
             );
@@ -1001,7 +1015,11 @@ impl ProcessRuntimeManager {
             // Update process status to stopped in database
             if let Err(e) = self
                 .process_repository
-                .update_process_status(&process_id, "stopped")
+                .update_process_status(
+                    &notification.environment_id,
+                    &notification.process_name,
+                    "stopped",
+                )
                 .await
             {
                 error!(
@@ -1011,7 +1029,11 @@ impl ProcessRuntimeManager {
             }
 
             // Also clear the PID in the database
-            if let Err(e) = self.process_repository.clear_process_pid(&process_id).await {
+            if let Err(e) = self
+                .process_repository
+                .clear_process_pid(&notification.environment_id, &notification.process_name)
+                .await
+            {
                 error!(
                     "Failed to clear process PID in database for '{}' in environment '{}': {}",
                     notification.process_name, notification.environment_id, e
@@ -1062,21 +1084,33 @@ impl ProcessRuntimeManager {
                     process_id, environment_id, pid
                 );
 
-                // Update status in database
-                if let Err(e) = self
-                    .process_repository
-                    .update_process_status(&process_id, "stopped")
-                    .await
-                {
-                    error!(
-                        "Failed to update process status for '{}': {}",
-                        process_id, e
-                    );
-                }
+                // Parse the process_id to get environment_id and name
+                if let Some((env_id, name)) = process_id.split_once(':') {
+                    // Update status in database
+                    if let Err(e) = self
+                        .process_repository
+                        .update_process_status(env_id, name, "stopped")
+                        .await
+                    {
+                        error!(
+                            "Failed to update process status for '{}': {}",
+                            process_id, e
+                        );
+                    }
 
-                // Clear PID in database
-                if let Err(e) = self.process_repository.clear_process_pid(&process_id).await {
-                    error!("Failed to clear PID for process '{}': {}", process_id, e);
+                    // Clear PID in database
+                    if let Err(e) = self
+                        .process_repository
+                        .clear_process_pid(env_id, name)
+                        .await
+                    {
+                        error!("Failed to clear PID for process '{}': {}", process_id, e);
+                    }
+                } else {
+                    error!(
+                        "Invalid process_id format '{}', expected 'environment:name'",
+                        process_id
+                    );
                 }
 
                 cleaned_up += 1;

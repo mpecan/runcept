@@ -39,7 +39,18 @@ impl ProcessRepository {
     }
 
     /// Update process status in the database
-    pub async fn update_process_status(&self, process_id: &str, status: &str) -> Result<()> {
+    pub async fn update_process_status(
+        &self,
+        environment_id: &str,
+        name: &str,
+        status: &str,
+    ) -> Result<()> {
+        let process_id = format!("{environment_id}:{name}");
+        self.update_process_status_by_id(&process_id, status).await
+    }
+
+    /// Update process status by process_id (internal use only)
+    async fn update_process_status_by_id(&self, process_id: &str, status: &str) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE processes 
@@ -56,7 +67,13 @@ impl ProcessRepository {
     }
 
     /// Clear process PID in the database
-    pub async fn clear_process_pid(&self, process_id: &str) -> Result<()> {
+    pub async fn clear_process_pid(&self, environment_id: &str, name: &str) -> Result<()> {
+        let process_id = format!("{environment_id}:{name}");
+        self.clear_process_pid_by_id(&process_id).await
+    }
+
+    /// Clear process PID by process_id (internal use only)
+    async fn clear_process_pid_by_id(&self, process_id: &str) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE processes 
@@ -72,7 +89,13 @@ impl ProcessRepository {
     }
 
     /// Set process PID in the database
-    pub async fn set_process_pid(&self, process_id: &str, pid: i64) -> Result<()> {
+    pub async fn set_process_pid(&self, environment_id: &str, name: &str, pid: i64) -> Result<()> {
+        let process_id = format!("{environment_id}:{name}");
+        self.set_process_pid_by_id(&process_id, pid).await
+    }
+
+    /// Set process PID by process_id (internal use only)
+    async fn set_process_pid_by_id(&self, process_id: &str, pid: i64) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE processes 
@@ -162,7 +185,13 @@ impl ProcessRepository {
     }
 
     /// Delete a process from the database
-    pub async fn delete_process(&self, process_id: &str) -> Result<bool> {
+    pub async fn delete_process(&self, environment_id: &str, name: &str) -> Result<bool> {
+        let process_id = format!("{environment_id}:{name}");
+        self.delete_process_by_id(&process_id).await
+    }
+
+    /// Delete a process by process_id (internal use only)
+    async fn delete_process_by_id(&self, process_id: &str) -> Result<bool> {
         let result = sqlx::query("DELETE FROM processes WHERE id = ?")
             .bind(process_id)
             .execute(self.pool.as_ref())
@@ -172,7 +201,13 @@ impl ProcessRepository {
     }
 
     /// Update process last activity time
-    pub async fn update_process_activity(&self, process_id: &str) -> Result<()> {
+    pub async fn update_process_activity(&self, environment_id: &str, name: &str) -> Result<()> {
+        let process_id = format!("{environment_id}:{name}");
+        self.update_process_activity_by_id(&process_id).await
+    }
+
+    /// Update process activity by process_id (internal use only)
+    async fn update_process_activity_by_id(&self, process_id: &str) -> Result<()> {
         let now = chrono::Utc::now();
         sqlx::query(
             r#"
@@ -189,8 +224,8 @@ impl ProcessRepository {
         Ok(())
     }
 
-    /// Get process by ID
-    pub async fn get_process_by_id(&self, process_id: &str) -> Result<Option<ProcessRecord>> {
+    /// Get process by ID (internal use only)
+    async fn get_process_by_id(&self, process_id: &str) -> Result<Option<ProcessRecord>> {
         let row = sqlx::query(
             r#"
             SELECT id, name, command, working_dir, environment_id, status, pid,
@@ -328,7 +363,19 @@ impl ProcessRepository {
     }
 
     /// Update process command
-    pub async fn update_process_command(&self, process_id: &str, command: &str) -> Result<()> {
+    pub async fn update_process_command(
+        &self,
+        environment_id: &str,
+        name: &str,
+        command: &str,
+    ) -> Result<()> {
+        let process_id = format!("{environment_id}:{name}");
+        self.update_process_command_by_id(&process_id, command)
+            .await
+    }
+
+    /// Update process command by process_id (internal use only)
+    async fn update_process_command_by_id(&self, process_id: &str, command: &str) -> Result<()> {
         let now = chrono::Utc::now();
         sqlx::query(
             r#"
@@ -348,6 +395,18 @@ impl ProcessRepository {
 
     /// Update process working directory
     pub async fn update_process_working_dir(
+        &self,
+        environment_id: &str,
+        name: &str,
+        working_dir: &str,
+    ) -> Result<()> {
+        let process_id = format!("{environment_id}:{name}");
+        self.update_process_working_dir_by_id(&process_id, working_dir)
+            .await
+    }
+
+    /// Update process working directory by process_id (internal use only)
+    async fn update_process_working_dir_by_id(
         &self,
         process_id: &str,
         working_dir: &str,
@@ -494,8 +553,8 @@ mod tests {
         let repo = ProcessRepository::new(Arc::new(db.get_pool().clone()));
 
         // Create a test process
-        let process_id = Uuid::new_v4().to_string();
         let environment_id = Uuid::new_v4().to_string();
+        let process_id = format!("{environment_id}:test_process");
 
         // Create test environment first
         create_test_environment(&db, &environment_id).await;
@@ -512,30 +571,50 @@ mod tests {
         );
         repo.insert_process(&test_process).await.unwrap();
 
-        // Get process by ID
-        let process = repo.get_process_by_id(&process_id).await.unwrap().unwrap();
+        // Get process by name
+        let process = repo
+            .get_process_by_name(&environment_id, "test_process")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(process.name, "test_process");
         assert_eq!(process.status, "running");
         assert_eq!(process.pid, Some(1234));
 
         // Update process status
-        repo.update_process_status(&process_id, "stopped")
+        repo.update_process_status(&environment_id, "test_process", "stopped")
             .await
             .unwrap();
-        let process = repo.get_process_by_id(&process_id).await.unwrap().unwrap();
+        let process = repo
+            .get_process_by_name(&environment_id, "test_process")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(process.status, "stopped");
 
         // Clear PID
-        repo.clear_process_pid(&process_id).await.unwrap();
-        let process = repo.get_process_by_id(&process_id).await.unwrap().unwrap();
+        repo.clear_process_pid(&environment_id, "test_process")
+            .await
+            .unwrap();
+        let process = repo
+            .get_process_by_name(&environment_id, "test_process")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(process.pid, None);
 
         // Delete process
-        let deleted = repo.delete_process(&process_id).await.unwrap();
+        let deleted = repo
+            .delete_process(&environment_id, "test_process")
+            .await
+            .unwrap();
         assert!(deleted);
 
         // Verify deletion
-        let process = repo.get_process_by_id(&process_id).await.unwrap();
+        let process = repo
+            .get_process_by_name(&environment_id, "test_process")
+            .await
+            .unwrap();
         assert!(process.is_none());
     }
 
@@ -546,8 +625,8 @@ mod tests {
 
         let repo = ProcessRepository::new(Arc::new(db.get_pool().clone()));
 
-        let process_id = Uuid::new_v4().to_string();
         let environment_id = Uuid::new_v4().to_string();
+        let process_id = format!("{environment_id}:test_process");
 
         // Create test environment first
         create_test_environment(&db, &environment_id).await;
