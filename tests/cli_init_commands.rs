@@ -1,9 +1,6 @@
 mod common;
 
-use common::{
-    assertions::*,
-    environment::{RunceptTestEnvironment, TestConfig},
-};
+use common::environment::{RunceptTestEnvironment, TestConfig};
 
 /// Tests for CLI init command functionality
 /// Verifies that the init command properly creates and manages .runcept.toml files
@@ -56,10 +53,13 @@ async fn test_init_with_custom_path() {
         .await
         .expect("Failed to create custom directory");
 
-    // Run init command with custom path
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["init", &custom_dir.to_string_lossy()]);
-    assert_success_with_output(cmd, "initialized");
+    // Run init command with custom path using centralized method
+    let output = test_env.init_project(Some(&custom_dir.to_string_lossy()), false);
+    assert!(output.status.success(), "Init command should succeed");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("initialized"),
+        "Output should contain 'initialized'"
+    );
 
     // Verify .runcept.toml was created in custom directory
     let config_path = custom_dir.join(".runcept.toml");
@@ -100,9 +100,7 @@ command = "echo existing"
     test_env.create_config_file(existing_config).await.unwrap();
 
     // Run init command - should fail because config already exists
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["init"]);
-    assert_failure_with_error(cmd, "already exists");
+    test_env.assert_cmd_failure(&["init"], "already exists");
 
     // Verify original config is unchanged
     let config_path = test_env.project_dir().join(".runcept.toml");
@@ -136,10 +134,13 @@ command = "echo old"
 
     test_env.create_config_file(existing_config).await.unwrap();
 
-    // Run init command with --force flag
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["init", "--force"]);
-    assert_success_with_output(cmd, "initialized");
+    // Run init command with --force flag using centralized method
+    let output = test_env.init_project(None, true);
+    assert!(output.status.success(), "Init with --force should succeed");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("initialized"),
+        "Output should contain 'initialized'"
+    );
 
     // Verify config was overwritten with new default content
     let config_path = test_env.project_dir().join(".runcept.toml");
@@ -168,27 +169,20 @@ async fn test_init_generated_config_is_valid_and_activatable() {
     })
     .await;
 
-    // Run init command
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["init"]);
-    assert_success_with_output(cmd, "initialized");
+    // Run init command using centralized method
+    test_env.assert_cmd_success(&["init"], "initialized");
 
     // Try to activate the generated configuration
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    test_env.assert_cmd_success(
+        &["activate", &test_env.project_dir().to_string_lossy()], 
+        "activated"
+    );
 
     // Verify we can check status after activation
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["status"]);
-    assert_success_with_output(cmd, "environment");
+    test_env.assert_cmd_success(&["status"], "environment");
 
     // If there are any sample processes in the generated config, verify we can list them
-    let list_output = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output = test_env.list_processes();
 
     // Should succeed even if no processes are defined
     assert!(
@@ -212,10 +206,13 @@ async fn test_init_creates_proper_directory_structure() {
         .join("to")
         .join("new_project");
 
-    // Run init command with nested path
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["init", &nested_path.to_string_lossy()]);
-    assert_success_with_output(cmd, "initialized");
+    // Run init command with nested path using centralized method
+    let output = test_env.init_project(Some(&nested_path.to_string_lossy()), false);
+    assert!(output.status.success(), "Init command should succeed");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("initialized"),
+        "Output should contain 'initialized'"
+    );
 
     // Verify the nested directory structure was created
     assert!(
@@ -243,11 +240,7 @@ async fn test_init_with_invalid_path_permissions() {
     // Note: This test might behave differently depending on system permissions
     let invalid_path = "/root/should_not_work";
 
-    let init_output = test_env
-        .runcept_cmd()
-        .args(["init", invalid_path])
-        .output()
-        .expect("Failed to execute init command");
+    let init_output = test_env.init_project(Some(invalid_path), false);
 
     // Should either fail gracefully or succeed if we actually have permissions
     if !init_output.status.success() {
@@ -283,12 +276,8 @@ async fn test_init_with_relative_paths() {
             .await
             .expect("Failed to create target directory");
 
-        // Run init with relative path
-        let init_output = test_env
-            .runcept_cmd()
-            .args(["init", rel_path, "--force"]) // Use force to avoid conflicts
-            .output()
-            .expect("Failed to execute init command");
+        // Run init with relative path using centralized method
+        let init_output = test_env.init_project(Some(rel_path), true);
 
         if init_output.status.success() {
             // Verify config was created
