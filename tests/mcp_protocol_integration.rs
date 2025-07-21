@@ -89,10 +89,7 @@ mod mcp_protocol_tests {
         }
 
         fn init_project(&self) -> Result<(), Box<dyn std::error::Error>> {
-            let mut cmd = std::process::Command::new(self.test_env.binary_path());
-            cmd.args(["init", &self.project_dir().to_string_lossy()])
-                .env("HOME", self.test_env.home_dir());
-            let output = cmd.output()?;
+            let output = self.test_env.init_project(Some(&self.project_dir().to_string_lossy()), false);
             if !output.status.success() {
                 return Err(format!(
                     "Init command failed: {}",

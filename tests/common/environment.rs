@@ -444,6 +444,38 @@ impl RunceptTestEnvironment {
         }
         self.execute_cmd(&args)
     }
+
+    // MCP server convenience methods
+    /// Spawn an MCP server process with proper stdio configuration
+    pub fn spawn_mcp_server(&self) -> Result<std::process::Child, std::io::Error> {
+        use std::process::{Command, Stdio};
+        
+        let mut mcp_cmd = Command::new(self.binary_path());
+        mcp_cmd
+            .args(["mcp"])
+            .env("HOME", self.home_dir())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        mcp_cmd.spawn()
+    }
+
+    /// Spawn an MCP server process with a specific working directory
+    pub fn spawn_mcp_server_with_cwd(&self, working_dir: &std::path::Path) -> Result<std::process::Child, std::io::Error> {
+        use std::process::{Command, Stdio};
+        
+        let mut mcp_cmd = Command::new(self.binary_path());
+        mcp_cmd
+            .args(["mcp"])
+            .env("HOME", self.home_dir())
+            .current_dir(working_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        mcp_cmd.spawn()
+    }
 }
 
 impl Drop for RunceptTestEnvironment {

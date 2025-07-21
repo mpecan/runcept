@@ -6,7 +6,6 @@ use common::{
     fixtures::*,
 };
 use std::io::Write;
-use std::process::{Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -28,20 +27,15 @@ async fn test_mcp_server_starts_and_responds() {
         .unwrap();
 
     // Activate environment
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    test_env.assert_cmd_success(
+        &["activate", &test_env.project_dir().to_string_lossy()], 
+        "activated"
+    );
 
-    // Start MCP server in background
-    let mut mcp_cmd = Command::new(test_env.binary_path());
-    mcp_cmd
-        .args(["mcp"])
-        .env("HOME", test_env.home_dir())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-
-    let mut mcp_process = mcp_cmd.spawn().expect("Failed to start MCP server");
+    // Start MCP server in background using centralized helper
+    let mut mcp_process = test_env
+        .spawn_mcp_server()
+        .expect("Failed to start MCP server");
 
     // Give MCP server time to start
     sleep(Duration::from_millis(500)).await;
@@ -90,27 +84,17 @@ async fn test_mcp_server_with_environment_context() {
         .unwrap();
 
     // Activate environment
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    test_env.assert_cmd_success(
+        &["activate", &test_env.project_dir().to_string_lossy()], 
+        "activated"
+    );
 
     // Start some processes to have context for MCP server
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "worker-1"]);
-    assert_success_with_output(cmd, "started");
+    test_env.assert_cmd_success(&["start", "worker-1"], "started");
 
     // Start MCP server with active environment and running processes
-    let mut mcp_cmd = Command::new(test_env.binary_path());
-    mcp_cmd
-        .args(["mcp"])
-        .env("HOME", test_env.home_dir())
-        .current_dir(test_env.project_dir())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut mcp_process = mcp_cmd
-        .spawn()
+    let mut mcp_process = test_env
+        .spawn_mcp_server_with_cwd(test_env.project_dir())
         .expect("Failed to start MCP server with environment");
 
     // Give MCP server time to initialize with environment context
@@ -164,17 +148,9 @@ async fn test_mcp_server_without_environment() {
 
     // Don't activate any environment - test MCP server behavior without context
 
-    // Start MCP server without active environment
-    let mut mcp_cmd = Command::new(test_env.binary_path());
-    mcp_cmd
-        .args(["mcp"])
-        .env("HOME", test_env.home_dir())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut mcp_process = mcp_cmd
-        .spawn()
+    // Start MCP server without active environment using centralized helper
+    let mut mcp_process = test_env
+        .spawn_mcp_server()
         .expect("Failed to start MCP server without environment");
 
     // Give MCP server time to start
@@ -241,20 +217,15 @@ async fn test_mcp_server_handles_invalid_input() {
         .unwrap();
 
     // Activate environment
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    test_env.assert_cmd_success(
+        &["activate", &test_env.project_dir().to_string_lossy()], 
+        "activated"
+    );
 
-    // Start MCP server
-    let mut mcp_cmd = Command::new(test_env.binary_path());
-    mcp_cmd
-        .args(["mcp"])
-        .env("HOME", test_env.home_dir())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut mcp_process = mcp_cmd.spawn().expect("Failed to start MCP server");
+    // Start MCP server using centralized helper
+    let mut mcp_process = test_env
+        .spawn_mcp_server()
+        .expect("Failed to start MCP server");
 
     // Give MCP server time to start
     sleep(Duration::from_millis(500)).await;
