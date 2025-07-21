@@ -99,12 +99,6 @@ impl From<toml::de::Error> for RunceptError {
     }
 }
 
-impl From<nix::Error> for RunceptError {
-    fn from(error: nix::Error) -> Self {
-        RunceptError::SystemError(error.to_string())
-    }
-}
-
 impl RunceptError {
     pub fn is_retriable(&self) -> bool {
         matches!(

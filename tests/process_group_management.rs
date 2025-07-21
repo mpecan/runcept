@@ -4,9 +4,8 @@ use common::{
     assertions::assert_process_status,
     environment::{RunceptTestEnvironment, TestConfig},
 };
-use nix::sys::signal;
-use nix::unistd::Pid;
 use std::time::Duration;
+use sysinfo::System;
 
 /// Tests for process group management - ensuring parent processes and their children are properly managed
 
@@ -64,12 +63,12 @@ auto_restart = false
         .expect("Failed to list processes");
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
-    
+
     let parent_pid = extract_pid_from_list_output(&list_stdout, "parent-with-children")
         .unwrap_or_else(|| {
             println!("Could not find PID for parent process 'parent-with-children'");
             println!("Full list output:\n{}", list_stdout);
-            
+
             // Get process logs for debugging
             if let Ok(logs_output) = test_env
                 .runcept_cmd()
@@ -80,7 +79,7 @@ auto_restart = false
                 println!("stdout: {}", String::from_utf8_lossy(&logs_output.stdout));
                 println!("stderr: {}", String::from_utf8_lossy(&logs_output.stderr));
             }
-            
+
             panic!("Could not find PID for parent process");
         });
 
@@ -205,12 +204,12 @@ auto_restart = false
         .expect("Failed to list processes");
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
-    
-    let parent_pid = extract_pid_from_list_output(&list_stdout, "nested-parent")
-        .unwrap_or_else(|| {
+
+    let parent_pid =
+        extract_pid_from_list_output(&list_stdout, "nested-parent").unwrap_or_else(|| {
             println!("Could not find PID for nested parent process 'nested-parent'");
             println!("Full list output:\n{}", list_stdout);
-            
+
             // Get process logs for debugging
             if let Ok(logs_output) = test_env
                 .runcept_cmd()
@@ -221,7 +220,7 @@ auto_restart = false
                 println!("stdout: {}", String::from_utf8_lossy(&logs_output.stdout));
                 println!("stderr: {}", String::from_utf8_lossy(&logs_output.stderr));
             }
-            
+
             panic!("Could not find PID for nested parent process");
         });
 
@@ -258,10 +257,10 @@ auto_restart = false
     }
 }
 
-/// Helper function to check if a process is alive using Unix signals
+/// Helper function to check if a process is alive using sysinfo
 fn is_process_alive(pid: i32) -> bool {
-    let nix_pid = Pid::from_raw(pid);
-    signal::kill(nix_pid, None).is_ok()
+    let system = System::new_all();
+    system.process(sysinfo::Pid::from_u32(pid as u32)).is_some()
 }
 
 /// Helper function to extract PID from runcept list output
@@ -272,15 +271,15 @@ fn extract_pid_from_list_output(output: &str, process_name: &str) -> Option<i32>
         if line.contains("PROCESS") || line.contains("-------") || line.trim().is_empty() {
             continue;
         }
-        
+
         // Skip log lines that start with timestamps
         if line.contains("[") && line.contains("INFO") {
             continue;
         }
-        
+
         if line.contains(process_name) {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            
+
             // Look for the process name, then status, then PID
             // Expected format: process-name status PID uptime environment
             for (i, part) in parts.iter().enumerate() {
@@ -295,7 +294,7 @@ fn extract_pid_from_list_output(output: &str, process_name: &str) -> Option<i32>
                     }
                 }
             }
-            
+
             // Fallback: look for any valid PID in the line
             for part in parts.iter() {
                 if let Ok(pid) = part.parse::<i32>() {
@@ -306,7 +305,7 @@ fn extract_pid_from_list_output(output: &str, process_name: &str) -> Option<i32>
             }
         }
     }
-    
+
     None
 }
 

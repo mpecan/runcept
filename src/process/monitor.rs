@@ -438,21 +438,10 @@ impl ProcessWatcher {
 
     /// Check if a process is still running
     fn is_process_running(pid: u32) -> bool {
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::kill;
-            use nix::unistd::Pid;
+        use sysinfo::System;
 
-            let nix_pid = Pid::from_raw(pid as i32);
-            kill(nix_pid, None).is_ok()
-        }
-
-        #[cfg(not(unix))]
-        {
-            // On non-Unix systems, we'll implement a different approach
-            // For now, just assume the process is still running
-            true
-        }
+        let system = System::new_all();
+        system.process(sysinfo::Pid::from_u32(pid)).is_some()
     }
 
     pub async fn stop(mut self) -> Result<()> {

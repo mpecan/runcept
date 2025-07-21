@@ -4,13 +4,12 @@
 #![allow(unused_mut)]
 
 use assert_cmd::Command;
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::{Mutex, Once};
 use std::time::Duration;
+use sysinfo::{Signal as SysinfoSignal, System};
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 
@@ -82,7 +81,7 @@ pub struct RunceptTestEnvironment {
     project_dir: PathBuf,
     runcept_dir: PathBuf,
     daemon_process: Option<Child>,
-    daemon_pid: Option<Pid>,
+    daemon_pid: Option<u32>,
     config: TestConfig,
 }
 
@@ -168,7 +167,7 @@ impl RunceptTestEnvironment {
     }
 
     /// Get the daemon PID if it exists
-    pub fn daemon_pid(&self) -> Option<Pid> {
+    pub fn daemon_pid(&self) -> Option<u32> {
         self.daemon_pid
     }
 
@@ -238,7 +237,7 @@ impl RunceptTestEnvironment {
         let child = cmd.spawn()?;
 
         // Capture the PID for proper process management
-        self.daemon_pid = Some(Pid::from_raw(child.id() as i32));
+        self.daemon_pid = Some(child.id());
         self.daemon_process = Some(child);
 
         // Wait for daemon to be ready
@@ -284,17 +283,25 @@ impl RunceptTestEnvironment {
         // Try graceful shutdown first via CLI command
         let _ = self.runcept_cmd().args(["daemon", "stop"]).output();
 
-        // If we have a PID, try Unix signals for cleanup
+        // If we have a PID, try to kill the process gracefully
         if let Some(pid) = self.daemon_pid.take() {
-            // First try SIGTERM for graceful shutdown
-            if signal::kill(pid, Some(Signal::SIGTERM)).is_ok() {
-                // Wait a bit for graceful shutdown
-                tokio::time::sleep(Duration::from_millis(1000)).await;
+            let mut system = System::new_all();
 
-                // Check if process is still running
-                if signal::kill(pid, None).is_ok() {
-                    // Still running, force kill with SIGKILL
-                    let _ = signal::kill(pid, Some(Signal::SIGKILL));
+            let sysinfo_pid = sysinfo::Pid::from_u32(pid);
+            if let Some(process) = system.process(sysinfo_pid) {
+                // First try SIGTERM for graceful shutdown
+                if process.kill_with(SysinfoSignal::Term).unwrap_or(false) {
+                    // Wait a bit for graceful shutdown
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+                    // Check if process is still running
+                    system.refresh_all();
+                    if system.process(sysinfo_pid).is_some() {
+                        // Still running, force kill with SIGKILL
+                        if let Some(process) = system.process(sysinfo_pid) {
+                            let _ = process.kill_with(SysinfoSignal::Kill);
+                        }
+                    }
                 }
             }
         }
@@ -331,14 +338,11 @@ impl RunceptTestEnvironment {
         }
     }
 
-    /// Check if daemon is running using Unix process signals
+    /// Check if daemon is running using sysinfo
     pub fn is_daemon_running(&self) -> bool {
         if let Some(pid) = self.daemon_pid {
-            // Use signal 0 to check if process exists without actually sending a signal
-            match signal::kill(pid, None) {
-                Ok(()) => true,  // Process exists and we can signal it
-                Err(_) => false, // Process doesn't exist or can't be signaled
-            }
+            let system = System::new_all();
+            system.process(sysinfo::Pid::from_u32(pid)).is_some()
         } else {
             false
         }
@@ -449,7 +453,7 @@ impl RunceptTestEnvironment {
     /// Spawn an MCP server process with proper stdio configuration
     pub fn spawn_mcp_server(&self) -> Result<std::process::Child, std::io::Error> {
         use std::process::{Command, Stdio};
-        
+
         let mut mcp_cmd = Command::new(self.binary_path());
         mcp_cmd
             .args(["mcp"])
@@ -462,9 +466,12 @@ impl RunceptTestEnvironment {
     }
 
     /// Spawn an MCP server process with a specific working directory
-    pub fn spawn_mcp_server_with_cwd(&self, working_dir: &std::path::Path) -> Result<std::process::Child, std::io::Error> {
+    pub fn spawn_mcp_server_with_cwd(
+        &self,
+        working_dir: &std::path::Path,
+    ) -> Result<std::process::Child, std::io::Error> {
         use std::process::{Command, Stdio};
-        
+
         let mut mcp_cmd = Command::new(self.binary_path());
         mcp_cmd
             .args(["mcp"])
@@ -488,17 +495,25 @@ impl Drop for RunceptTestEnvironment {
             .arg(self.get_socket_path())
             .output();
 
-        // If we have a PID, try Unix signals for cleanup
+        // If we have a PID, try sysinfo for cleanup
         if let Some(pid) = self.daemon_pid.take() {
-            // First try SIGTERM for graceful shutdown
-            if signal::kill(pid, Some(Signal::SIGTERM)).is_ok() {
-                // Wait a bit for graceful shutdown
-                std::thread::sleep(Duration::from_millis(500));
+            let mut system = System::new_all();
 
-                // Check if process is still running
-                if signal::kill(pid, None).is_ok() {
-                    // Still running, force kill with SIGKILL
-                    let _ = signal::kill(pid, Some(Signal::SIGKILL));
+            let sysinfo_pid = sysinfo::Pid::from_u32(pid);
+            if let Some(process) = system.process(sysinfo_pid) {
+                // First try SIGTERM for graceful shutdown
+                if process.kill_with(SysinfoSignal::Term).unwrap_or(false) {
+                    // Wait a bit for graceful shutdown
+                    std::thread::sleep(Duration::from_millis(500));
+
+                    // Check if process is still running
+                    system.refresh_all();
+                    if system.process(sysinfo_pid).is_some() {
+                        // Still running, force kill with SIGKILL
+                        if let Some(process) = system.process(sysinfo_pid) {
+                            let _ = process.kill_with(SysinfoSignal::Kill);
+                        }
+                    }
                 }
             }
         }

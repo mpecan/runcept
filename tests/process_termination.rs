@@ -4,9 +4,8 @@ use common::{
     assertions::*,
     environment::{RunceptTestEnvironment, TestConfig},
 };
-use nix::sys::signal;
-use nix::unistd::Pid;
 use std::time::Duration;
+use sysinfo::System;
 
 /// Tests that verify processes are actually terminated at the system level
 /// These tests use Unix signals to verify that stop/restart commands
@@ -234,11 +233,10 @@ auto_restart = false
     assert_output_contains(&status_output, "running");
 }
 
-/// Helper function to check if a process is alive using Unix signals
+/// Helper function to check if a process is alive using sysinfo
 fn is_process_alive(pid: i32) -> bool {
-    let nix_pid = Pid::from_raw(pid);
-    // Use signal 0 to check if process exists without actually sending a signal
-    signal::kill(nix_pid, None).is_ok()
+    let system = System::new_all();
+    system.process(sysinfo::Pid::from_u32(pid as u32)).is_some()
 }
 
 /// Helper function to extract PID from runcept list output

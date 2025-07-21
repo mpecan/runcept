@@ -902,134 +902,85 @@ impl ProcessRuntimeManager {
 
     /// Check if a process is still alive by PID
     pub fn is_process_alive(pid: u32) -> bool {
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::kill;
-            use nix::unistd::Pid;
+        use sysinfo::System;
 
-            // Handle potential invalid PIDs gracefully
-            if pid == 0 {
-                return false;
-            }
-
-            let nix_pid = match Pid::from_raw(pid as i32) {
-                pid if pid.as_raw() > 0 => pid,
-                _ => return false,
-            };
-
-            // Use kill with signal 0 to check if process exists
-            kill(nix_pid, None).is_ok()
+        // Handle potential invalid PIDs gracefully
+        if pid == 0 {
+            return false;
         }
 
-        #[cfg(not(unix))]
-        {
-            // On non-Unix systems, we'll implement a different approach
-            // For now, just assume the process is still running
-            true
-        }
+        let system = System::new_all();
+
+        // Check if process with given PID exists
+        system.process(sysinfo::Pid::from_u32(pid)).is_some()
     }
 
     /// Kill a process and all its children by killing the entire process group
     async fn kill_process_by_pid(&self, pid: u32) -> Result<()> {
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{Signal, kill};
-            use nix::unistd::Pid;
+        use sysinfo::{Signal as SysinfoSignal, System};
 
-            // Handle potential invalid PIDs gracefully
-            if pid == 0 {
-                return Err(RunceptError::ProcessError("Invalid PID: 0".to_string()));
-            }
+        // Handle potential invalid PIDs gracefully
+        if pid == 0 {
+            return Err(RunceptError::ProcessError("Invalid PID: 0".to_string()));
+        }
 
-            let nix_pid = match Pid::from_raw(pid as i32) {
-                pid if pid.as_raw() > 0 => pid,
-                _ => return Err(RunceptError::ProcessError(format!("Invalid PID: {pid}"))),
-            };
+        let mut system = System::new_all();
 
-            // Kill the entire process group to ensure child processes are also terminated
-            // Use negative PID to kill the process group
-            let process_group_pid = Pid::from_raw(-(pid as i32));
+        let sysinfo_pid = sysinfo::Pid::from_u32(pid);
 
-            // First try SIGTERM (graceful shutdown) to the entire process group
-            match kill(process_group_pid, Signal::SIGTERM) {
-                Ok(_) => {
-                    info!("Sent SIGTERM to process group {}", pid);
+        // Check if the process exists
+        if let Some(process) = system.process(sysinfo_pid) {
+            // First try graceful termination
+            info!("Sending SIGTERM to process {}", pid);
+            if process.kill_with(SysinfoSignal::Term).unwrap_or(false) {
+                info!("Sent SIGTERM to process {}", pid);
 
-                    // Wait a bit for graceful shutdown
-                    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                // Wait a bit for graceful shutdown
+                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
 
-                    // Check if the main process is still alive
-                    if Self::is_process_alive(pid) {
-                        warn!(
-                            "Process group {} did not exit gracefully, sending SIGKILL",
-                            pid
-                        );
+                // Check if the process is still alive
+                system.refresh_all();
+                if system.process(sysinfo_pid).is_none() {
+                    info!("Process {} exited gracefully after SIGTERM", pid);
+                    return Ok(());
+                }
 
-                        // Force kill the entire process group with SIGKILL
-                        match kill(process_group_pid, Signal::SIGKILL) {
-                            Ok(_) => {
-                                info!("Sent SIGKILL to process group {}", pid);
-                                Ok(())
-                            }
-                            Err(e) => Err(RunceptError::ProcessError(format!(
-                                "Failed to send SIGKILL to process group {pid}: {e}"
-                            ))),
+                // Process is still alive, force kill it
+                warn!("Process {} did not exit gracefully, sending SIGKILL", pid);
+                system.refresh_all();
+                if let Some(process) = system.process(sysinfo_pid) {
+                    if process.kill_with(SysinfoSignal::Kill).unwrap_or(false) {
+                        info!("Sent SIGKILL to process {}", pid);
+
+                        // Give it a moment to be killed
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                        system.refresh_all();
+                        if system.process(sysinfo_pid).is_none() {
+                            info!("Process {} killed successfully", pid);
+                            return Ok(());
+                        } else {
+                            return Err(RunceptError::ProcessError(format!(
+                                "Failed to kill process {pid}: process still exists after SIGKILL"
+                            )));
                         }
                     } else {
-                        info!("Process group {} exited gracefully after SIGTERM", pid);
-                        Ok(())
+                        return Err(RunceptError::ProcessError(format!(
+                            "Failed to send SIGKILL to process {pid}"
+                        )));
                     }
                 }
-                Err(e) => {
-                    // If process group kill fails, fallback to killing just the parent process
-                    warn!(
-                        "Failed to kill process group {}, falling back to single process kill: {}",
-                        pid, e
-                    );
-
-                    // Fallback: kill just the parent process
-                    match kill(nix_pid, Signal::SIGTERM) {
-                        Ok(_) => {
-                            info!("Sent SIGTERM to process {} (fallback)", pid);
-
-                            // Wait a bit for graceful shutdown
-                            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-
-                            // Check if process is still alive
-                            if Self::is_process_alive(pid) {
-                                warn!("Process {} did not exit gracefully, sending SIGKILL", pid);
-
-                                // Force kill with SIGKILL
-                                match kill(nix_pid, Signal::SIGKILL) {
-                                    Ok(_) => {
-                                        info!("Sent SIGKILL to process {}", pid);
-                                        Ok(())
-                                    }
-                                    Err(e) => Err(RunceptError::ProcessError(format!(
-                                        "Failed to send SIGKILL to process {pid}: {e}"
-                                    ))),
-                                }
-                            } else {
-                                info!("Process {} exited gracefully after SIGTERM", pid);
-                                Ok(())
-                            }
-                        }
-                        Err(e) => Err(RunceptError::ProcessError(format!(
-                            "Failed to send SIGTERM to process {pid}: {e}"
-                        ))),
-                    }
-                }
+            } else {
+                return Err(RunceptError::ProcessError(format!(
+                    "Failed to send SIGTERM to process {pid}"
+                )));
             }
         }
 
-        #[cfg(not(unix))]
-        {
-            // On non-Unix systems, we'll implement a different approach
-            // For now, return an error indicating it's not supported
-            Err(RunceptError::ProcessError(
-                "Process killing by PID is not supported on this platform".to_string(),
-            ))
-        }
+        // Process doesn't exist
+        Err(RunceptError::ProcessError(format!(
+            "Process {pid} not found"
+        )))
     }
 
     /// Process any pending exit notifications
