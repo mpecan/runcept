@@ -28,10 +28,10 @@ async fn test_daemon_startup_and_status() {
     // Start daemon manually
     test_env.start_daemon().await.expect("Daemon should start");
 
-    // Test daemon status
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["daemon", "status"]);
-    assert_success_with_output(cmd, "Running");
+    // Test daemon status using new method
+    let output = test_env.daemon_status();
+    assert!(output.status.success(), "Daemon status should succeed");
+    assert_output_contains(&output, "Running");
 
     // Verify daemon is running
     assert!(
@@ -46,8 +46,8 @@ async fn test_daemon_startup_and_status() {
     // Stop daemon
     test_env.stop_daemon().await.expect("Daemon should stop");
 
-    // Verify daemon stopped
-    test_env.assert_cmd_success(&["daemon", "status"], "Not running");
+    // Verify daemon stopped using new assertion helper
+    assert_daemon_not_running_with_env(&test_env);
 
     // Socket should be removed
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -72,11 +72,7 @@ async fn test_daemon_handles_multiple_start_attempts() {
     assert!(test_env.is_daemon_running(), "Daemon should be running");
 
     // Try to start daemon again - should handle gracefully
-    let second_start_output = test_env
-        .runcept_cmd()
-        .args(["daemon", "start"])
-        .output()
-        .expect("Failed to execute second daemon start");
+    let second_start_output = test_env.daemon_start();
 
     // Either succeeds (idempotent) or fails with helpful message
     if !second_start_output.status.success() {
@@ -110,12 +106,8 @@ async fn test_daemon_stop_when_not_running() {
         "Daemon should not be running initially"
     );
 
-    // Try to stop daemon when it's not running
-    let stop_output = test_env
-        .runcept_cmd()
-        .args(["daemon", "stop"])
-        .output()
-        .expect("Failed to execute daemon stop");
+    // Try to stop daemon when it's not running using new method
+    let stop_output = test_env.daemon_stop();
 
     // Should either succeed (idempotent) or fail with helpful message
     if !stop_output.status.success() {
@@ -129,22 +121,23 @@ async fn test_daemon_stop_when_not_running() {
 
 #[tokio::test]
 async fn test_concurrent_daemon_operations() {
-    let test_env = RunceptTestEnvironment::with_config(TestConfig {
+    let mut test_env = RunceptTestEnvironment::with_config(TestConfig {
         project_name: "concurrent-daemon-ops".to_string(),
         enable_logging: true,
         ..TestConfig::default()
     })
     .await;
 
-    // Test concurrent status checks
+    // Ensure daemon is started explicitly
+    if !test_env.is_daemon_running() {
+        test_env.start_daemon().await.expect("Failed to start daemon for concurrent test");
+    }
+
+    // Test concurrent status checks using new method
     let status_tasks = (0..5).map(|_| {
         let test_env = &test_env;
         async move {
-            let status_output = test_env
-                .runcept_cmd()
-                .args(["daemon", "status"])
-                .output()
-                .expect("Failed to execute daemon status");
+            let status_output = test_env.daemon_status();
 
             // All status checks should succeed
             assert!(
@@ -157,8 +150,8 @@ async fn test_concurrent_daemon_operations() {
     // Run all status checks concurrently
     futures::future::join_all(status_tasks).await;
 
-    // Daemon should still be running
-    test_env.assert_cmd_success(&["daemon", "status"], "Not running");
+    // Daemon should still be running using new assertion helper
+    assert_daemon_running_with_env(&test_env);
 }
 
 #[tokio::test]
@@ -197,32 +190,30 @@ async fn test_daemon_logs_are_created() {
 
 #[tokio::test]
 async fn test_daemon_handles_invalid_commands() {
-    let mut test_env = RunceptTestEnvironment::with_config(TestConfig {
+    let test_env = RunceptTestEnvironment::with_config(TestConfig {
         project_name: "daemon-invalid-commands".to_string(),
         enable_logging: true,
         ..TestConfig::default()
     })
     .await;
 
-    // Test invalid daemon subcommand
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["daemon", "invalid-subcommand"]);
-    assert_failure_with_error(cmd, "Usage: runcept daemon");
+    // Test invalid daemon subcommand using execute_cmd
+    let invalid_cmd_output = test_env.execute_cmd(&["daemon", "invalid-subcommand"]);
+    assert!(
+        !invalid_cmd_output.status.success(),
+        "Invalid daemon subcommand should fail"
+    );
+    assert_output_contains(&invalid_cmd_output, "Usage: runcept daemon");
 
     // Test daemon command with invalid flags
-    let invalid_flag_output = test_env
-        .runcept_cmd()
-        .args(["daemon", "status", "--invalid-flag"])
-        .output()
-        .expect("Failed to execute daemon command with invalid flag");
+    let invalid_flag_output = test_env.execute_cmd(&["daemon", "status", "--invalid-flag"]);
 
     // Should either ignore the flag or provide helpful error
     if !invalid_flag_output.status.success() {
         let stderr = String::from_utf8_lossy(&invalid_flag_output.stderr);
         assert!(
             stderr.contains("unknown") || stderr.contains("flag") || stderr.contains("option"),
-            "Should provide meaningful error about invalid flag, got: {}",
-            stderr
+            "Should provide meaningful error about invalid flag, got: {stderr}"
         );
     }
 }
@@ -245,10 +236,10 @@ async fn test_daemon_graceful_shutdown() {
     // Record the daemon PID
     let daemon_pid = test_env.daemon_pid().expect("Should have daemon PID");
 
-    // Send graceful shutdown command
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["daemon", "stop"]);
-    assert_success_with_output(cmd, "stopped");
+    // Send graceful shutdown command using new method
+    let output = test_env.daemon_stop();
+    assert!(output.status.success(), "Daemon stop should succeed");
+    assert_output_contains(&output, "stopped");
 
     // Wait for daemon to shut down
     let mut attempts = 0;
@@ -257,8 +248,8 @@ async fn test_daemon_graceful_shutdown() {
         attempts += 1;
     }
 
-    // Daemon should have stopped
-    test_env.assert_cmd_success(&["daemon", "status"], "Not running");
+    // Daemon should have stopped using new assertion helper
+    assert_daemon_not_running_with_env(&test_env);
 
     // Socket file should be removed
     let socket_path = test_env.home_dir().join(".runcept").join("daemon.sock");

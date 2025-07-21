@@ -32,30 +32,25 @@ auto_restart = false
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate the environment
-    test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .assert()
-        .success();
+    let output = test_env.activate_environment(Some(&test_env.project_dir().to_string_lossy()));
+    assert!(
+        output.status.success(),
+        "Environment activation should succeed"
+    );
 
     // Start the process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "quick-exit"]);
-    assert_success_with_output(cmd, "started");
+    let output = test_env.start_process("quick-exit");
+    assert!(output.status.success(), "Process start should succeed");
+    assert_output_contains(&output, "started");
 
     // Initially the process should be running
-    let mut cmd = test_env.runcept_cmd();
-    assert_process_status(cmd, "quick-exit", "running");
+    assert_process_status_with_env(&test_env, "quick-exit", "running");
 
     // Wait for the process to exit (it sleeps for 1 second)
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
     // The process should now be detected as exited/stopped
-    let list_output = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output = test_env.list_processes();
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
 
@@ -66,13 +61,11 @@ auto_restart = false
                 || list_stdout.contains("exited")
                 || list_stdout.contains("finished")
                 || list_stdout.contains("completed")),
-        "Process exit should be detected and status updated. Actual output: {}",
-        list_stdout
+        "Process exit should be detected and status updated. Actual output: {list_stdout}"
     );
 
     // Check that logs contain exit information
-    let mut cmd = test_env.runcept_cmd();
-    assert_lifecycle_events_logged(cmd, "quick-exit");
+    assert_lifecycle_events_logged_with_env(&test_env, "quick-exit");
 }
 
 #[tokio::test]
@@ -98,26 +91,22 @@ auto_restart = false
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate the environment
-    test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .assert()
-        .success();
+    let output = test_env.activate_environment(Some(&test_env.project_dir().to_string_lossy()));
+    assert!(
+        output.status.success(),
+        "Environment activation should succeed"
+    );
 
     // Start the process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "crashing-process"]);
-    assert_success_with_output(cmd, "started");
+    let output = test_env.start_process("crashing-process");
+    assert!(output.status.success(), "Process start should succeed");
+    assert_output_contains(&output, "started");
 
     // Wait for the process to crash
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
     // Check that the crash is detected
-    let list_output = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output = test_env.list_processes();
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
 
@@ -128,16 +117,11 @@ auto_restart = false
                 || list_stdout.contains("failed")
                 || list_stdout.contains("exited")
                 || list_stdout.contains("stopped")),
-        "Process crash should be detected and status updated. Actual output: {}",
-        list_stdout
+        "Process crash should be detected and status updated. Actual output: {list_stdout}"
     );
 
     // Check logs for crash information
-    let logs_output = test_env
-        .runcept_cmd()
-        .args(["logs", "crashing-process"])
-        .output()
-        .expect("Failed to get logs");
+    let logs_output = test_env.get_process_logs("crashing-process");
 
     let logs_stdout = String::from_utf8_lossy(&logs_output.stdout);
 
@@ -146,8 +130,7 @@ auto_restart = false
         logs_stdout.contains("exit")
             || logs_stdout.contains("status")
             || logs_stdout.contains("42"),
-        "Logs should contain exit status information. Actual logs: {}",
-        logs_stdout
+        "Logs should contain exit status information. Actual logs: {logs_stdout}"
     );
 }
 
@@ -184,31 +167,32 @@ auto_restart = false
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate the environment
-    test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .assert()
-        .success();
+    let output = test_env.activate_environment(Some(&test_env.project_dir().to_string_lossy()));
+    assert!(
+        output.status.success(),
+        "Environment activation should succeed"
+    );
 
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "fast-exit"]);
     // Start all processes
-    assert_success_with_output(cmd, "started");
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "medium-exit"]);
-    assert_success_with_output(cmd, "started");
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "slow-exit"]);
-    assert_success_with_output(cmd, "started");
+    let output = test_env.start_process("fast-exit");
+    assert!(output.status.success(), "Fast process start should succeed");
+    assert_output_contains(&output, "started");
+
+    let output = test_env.start_process("medium-exit");
+    assert!(
+        output.status.success(),
+        "Medium process start should succeed"
+    );
+    assert_output_contains(&output, "started");
+
+    let output = test_env.start_process("slow-exit");
+    assert!(output.status.success(), "Slow process start should succeed");
+    assert_output_contains(&output, "started");
 
     // Wait 1 second - fast should be done, medium and slow should still be running
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let list_output_1 = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output_1 = test_env.list_processes();
 
     let list_stdout_1 = String::from_utf8_lossy(&list_output_1.stdout);
 
@@ -226,11 +210,7 @@ auto_restart = false
     // Wait 2 more seconds - medium should be done, slow might still be running
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
-    let list_output_2 = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output_2 = test_env.list_processes();
 
     let list_stdout_2 = String::from_utf8_lossy(&list_output_2.stdout);
 
@@ -244,11 +224,7 @@ auto_restart = false
     // Wait 2 more seconds - all should be done
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
-    let list_output_3 = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output_3 = test_env.list_processes();
 
     let list_stdout_3 = String::from_utf8_lossy(&list_output_3.stdout);
 
@@ -257,8 +233,7 @@ auto_restart = false
         !is_process_running_in_output(&list_stdout_3, "fast-exit")
             && !is_process_running_in_output(&list_stdout_3, "medium-exit")
             && !is_process_running_in_output(&list_stdout_3, "slow-exit"),
-        "All processes should have exited by now, but found running processes in output: {}",
-        list_stdout_3
+        "All processes should have exited by now, but found running processes in output: {list_stdout_3}"
     );
 }
 
@@ -285,26 +260,22 @@ auto_restart = false
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate the environment
-    test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .assert()
-        .success();
+    let output = test_env.activate_environment(Some(&test_env.project_dir().to_string_lossy()));
+    assert!(
+        output.status.success(),
+        "Environment activation should succeed"
+    );
 
     // Start the process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "unstable-process"]);
-    assert_success_with_output(cmd, "started");
+    let output = test_env.start_process("unstable-process");
+    assert!(output.status.success(), "Process start should succeed");
+    assert_output_contains(&output, "started");
 
     // Wait for it to crash
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
     // Verify it crashed
-    let list_output = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output = test_env.list_processes();
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     assert!(
@@ -313,16 +284,12 @@ auto_restart = false
     );
 
     // Now restart it
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["restart", "unstable-process"]);
-    assert_success_with_output(cmd, "restarted");
+    let output = test_env.restart_process("unstable-process");
+    assert!(output.status.success(), "Process restart should succeed");
+    assert_output_contains(&output, "restarted");
 
     // It should be running again (briefly)
-    let list_output_after_restart = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes after restart");
+    let list_output_after_restart = test_env.list_processes();
 
     let list_stdout_after_restart = String::from_utf8_lossy(&list_output_after_restart.stdout);
 

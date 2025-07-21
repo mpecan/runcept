@@ -367,6 +367,83 @@ impl RunceptTestEnvironment {
             .output()
             .expect("Failed to execute command")
     }
+
+    // Environment management convenience methods
+    pub fn activate_environment(&self, path: Option<&str>) -> std::process::Output {
+        let path = path.unwrap_or_else(|| self.project_dir().to_str().unwrap());
+        self.execute_cmd(&["activate", path])
+    }
+
+    pub fn deactivate_environment(&self) -> std::process::Output {
+        self.execute_cmd(&["deactivate"])
+    }
+
+    pub fn status(&self) -> std::process::Output {
+        self.execute_cmd(&["status"])
+    }
+
+    // Process management convenience methods
+    pub fn start_process(&self, name: &str) -> std::process::Output {
+        self.execute_cmd(&["start", name])
+    }
+
+    pub fn start_process_with_env(&self, name: &str, env_path: &str) -> std::process::Output {
+        self.execute_cmd(&["start", name, "--environment", env_path])
+    }
+
+    pub fn stop_process(&self, name: &str) -> std::process::Output {
+        self.execute_cmd(&["stop", name])
+    }
+
+    pub fn stop_process_with_env(&self, name: &str, env_path: &str) -> std::process::Output {
+        self.execute_cmd(&["stop", name, "--environment", env_path])
+    }
+
+    pub fn restart_process(&self, name: &str) -> std::process::Output {
+        self.execute_cmd(&["restart", name])
+    }
+
+    // Process information convenience methods
+    pub fn list_processes(&self) -> std::process::Output {
+        self.execute_cmd(&["list"])
+    }
+
+    pub fn list_processes_with_env(&self, env_path: &str) -> std::process::Output {
+        self.execute_cmd(&["list", "--environment", env_path])
+    }
+
+    pub fn get_process_logs(&self, name: &str) -> std::process::Output {
+        self.execute_cmd(&["logs", name])
+    }
+
+    pub fn get_process_logs_limited(&self, name: &str, lines: u32) -> std::process::Output {
+        self.execute_cmd(&["logs", name, "--lines", &lines.to_string()])
+    }
+
+    // Daemon management convenience methods
+    pub fn daemon_status(&self) -> std::process::Output {
+        self.execute_cmd(&["daemon", "status"])
+    }
+
+    pub fn daemon_start(&self) -> std::process::Output {
+        self.execute_cmd(&["daemon", "start"])
+    }
+
+    pub fn daemon_stop(&self) -> std::process::Output {
+        self.execute_cmd(&["daemon", "stop"])
+    }
+
+    // Initialization convenience methods
+    pub fn init_project(&self, path: Option<&str>, force: bool) -> std::process::Output {
+        let mut args = vec!["init"];
+        if let Some(path) = path {
+            args.push(path);
+        }
+        if force {
+            args.push("--force");
+        }
+        self.execute_cmd(&args)
+    }
 }
 
 impl Drop for RunceptTestEnvironment {

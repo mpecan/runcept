@@ -3,9 +3,8 @@ mod common;
 use common::{
     assertions::*,
     environment::{RunceptTestEnvironment, TestConfig},
-    fixtures::*,
 };
-use nix::sys::signal::{self, Signal};
+use nix::sys::signal;
 use nix::unistd::Pid;
 use std::time::Duration;
 
@@ -36,27 +35,20 @@ auto_restart = false
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate the environment
-    test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .assert()
-        .success();
+    let activate_output =
+        test_env.activate_environment(Some(&test_env.project_dir().to_string_lossy()));
+    assert!(
+        activate_output.status.success(),
+        "Failed to activate environment"
+    );
 
     // Start the process
-    let start_output = test_env
-        .runcept_cmd()
-        .args(["start", "long-running"])
-        .output()
-        .expect("Failed to start process");
-
+    let start_output = test_env.start_process("long-running");
     assert!(start_output.status.success(), "Failed to start process");
 
     // Get the PID of the started process by checking the list
-    let list_output = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output = test_env.list_processes();
+    assert!(list_output.status.success(), "Failed to list processes");
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
 
@@ -71,12 +63,7 @@ auto_restart = false
     );
 
     // Stop the process
-    let stop_output = test_env
-        .runcept_cmd()
-        .args(["stop", "long-running"])
-        .output()
-        .expect("Failed to stop process");
-
+    let stop_output = test_env.stop_process("long-running");
     assert!(stop_output.status.success(), "Failed to stop process");
 
     // Wait a moment for the stop to take effect
@@ -85,13 +72,16 @@ auto_restart = false
     // CRITICAL TEST: Verify the process is actually killed in the system
     assert!(
         !is_process_alive(process_pid),
-        "CRITICAL: Process PID {} is still alive after stop command. The stop command did not actually terminate the system process.",
-        process_pid
+        "CRITICAL: Process PID {process_pid} is still alive after stop command. The stop command did not actually terminate the system process."
     );
 
     // Also verify through runcept that the process is stopped
-    let mut cmd = test_env.runcept_cmd();
-    assert_process_status(cmd, "long-running", "stopped");
+    let status_output = test_env.status();
+    assert!(
+        status_output.status.success(),
+        "Status command should succeed"
+    );
+    assert_output_contains(&status_output, "stopped");
 }
 
 #[tokio::test]
@@ -117,23 +107,21 @@ auto_restart = false
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate the environment
-    test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .assert()
-        .success();
+    let activate_output =
+        test_env.activate_environment(Some(&test_env.project_dir().to_string_lossy()));
+    assert!(
+        activate_output.status.success(),
+        "Failed to activate environment"
+    );
 
     // Start the process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "restartable"]);
-    assert_success_with_output(cmd, "started");
+    let start_output = test_env.start_process("restartable");
+    assert!(start_output.status.success(), "Start should succeed");
+    assert_output_contains(&start_output, "started");
 
     // Get the initial PID
-    let list_output = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes");
+    let list_output = test_env.list_processes();
+    assert!(list_output.status.success(), "Failed to list processes");
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     let initial_pid = extract_pid_from_list_output(&list_stdout, "restartable")
@@ -145,19 +133,19 @@ auto_restart = false
     );
 
     // Restart the process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["restart", "restartable"]);
-    assert_success_with_output(cmd, "restarted");
+    let restart_output = test_env.restart_process("restartable");
+    assert!(restart_output.status.success(), "Restart should succeed");
+    assert_output_contains(&restart_output, "restarted");
 
     // Wait for restart to complete
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // Get the new PID
-    let new_list_output = test_env
-        .runcept_cmd()
-        .args(["list"])
-        .output()
-        .expect("Failed to list processes after restart");
+    let new_list_output = test_env.list_processes();
+    assert!(
+        new_list_output.status.success(),
+        "Failed to list processes after restart"
+    );
 
     let new_list_stdout = String::from_utf8_lossy(&new_list_output.stdout);
     let new_pid = extract_pid_from_list_output(&new_list_stdout, "restartable")
@@ -167,15 +155,13 @@ auto_restart = false
     // 1. Old process should be terminated
     assert!(
         !is_process_alive(initial_pid),
-        "CRITICAL: Old process PID {} is still alive after restart. The restart command did not terminate the old process.",
-        initial_pid
+        "CRITICAL: Old process PID {initial_pid} is still alive after restart. The restart command did not terminate the old process."
     );
 
     // 2. New process should be running
     assert!(
         is_process_alive(new_pid),
-        "CRITICAL: New process PID {} is not alive after restart. The restart command did not start a new process.",
-        new_pid
+        "CRITICAL: New process PID {new_pid} is not alive after restart. The restart command did not start a new process."
     );
 
     // 3. PIDs should be different (new process created)
@@ -185,8 +171,12 @@ auto_restart = false
     );
 
     // Verify through runcept that the process is running
-    let mut cmd = test_env.runcept_cmd();
-    assert_process_status(cmd, "restartable", "running");
+    let status_output = test_env.status();
+    assert!(
+        status_output.status.success(),
+        "Status command should succeed"
+    );
+    assert_output_contains(&status_output, "running");
 }
 
 #[tokio::test]
@@ -213,30 +203,35 @@ auto_restart = false
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate environment
-    test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .assert()
-        .success();
+    let activate_output =
+        test_env.activate_environment(Some(&test_env.project_dir().to_string_lossy()));
+    assert!(
+        activate_output.status.success(),
+        "Failed to activate environment"
+    );
 
     // Start process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "stoppable-process"]);
-    assert_success_with_output(cmd, "started");
+    let start_output = test_env.start_process("stoppable-process");
+    assert!(start_output.status.success(), "Start should succeed");
+    assert_output_contains(&start_output, "started");
 
     // Stop process
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["stop", "stoppable-process"]);
-    assert_success_with_output(cmd, "stopped");
+    let stop_output = test_env.stop_process("stoppable-process");
+    assert!(stop_output.status.success(), "Stop should succeed");
+    assert_output_contains(&stop_output, "stopped");
 
     // Try to restart the stopped process - this should work without database errors
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["restart", "stoppable-process"]);
-    assert_success_with_output(cmd, "restarted");
+    let restart_output = test_env.restart_process("stoppable-process");
+    assert!(restart_output.status.success(), "Restart should succeed");
+    assert_output_contains(&restart_output, "restarted");
 
     // Verify the process is running
-    let mut cmd = test_env.runcept_cmd();
-    assert_process_status(cmd, "stoppable-process", "running");
+    let status_output = test_env.status();
+    assert!(
+        status_output.status.success(),
+        "Status command should succeed"
+    );
+    assert_output_contains(&status_output, "running");
 }
 
 /// Helper function to check if a process is alive using Unix signals
@@ -250,15 +245,15 @@ fn is_process_alive(pid: i32) -> bool {
 fn extract_pid_from_list_output(output: &str, process_name: &str) -> Option<i32> {
     for line in output.lines() {
         if line.contains(process_name) {
-            println!("{}", line);
+            println!("{line}");
             // Parse the line to extract PID
             // Assumes format like: "process_name    running   12345    ..."
             let parts: Vec<&str> = line.split_whitespace().collect();
             for (i, part) in parts.iter().enumerate() {
                 if part == &process_name {
                     // Look for PID in subsequent columns
-                    for j in (i + 1)..parts.len() {
-                        if let Ok(pid) = parts[j].parse::<i32>() {
+                    for part in parts.iter().skip(i + 1) {
+                        if let Ok(pid) = part.parse::<i32>() {
                             // Sanity check - PID should be reasonable
                             if pid > 0 && pid < 99999 {
                                 return Some(pid);

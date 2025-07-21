@@ -5,7 +5,6 @@ use common::{
     environment::{RunceptTestEnvironment, TestConfig},
     fixtures::*,
 };
-use std::time::Duration;
 
 /// Tests for CLI environment management commands (activate, deactivate, status)
 /// Verifies that environment activation/deactivation works correctly across daemon restarts
@@ -25,17 +24,16 @@ async fn test_environment_activation_and_deactivation() {
         .unwrap();
 
     // Test activation
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    let activate_output = test_env.activate_environment(None);
+    assert!(
+        activate_output.status.success(),
+        "Activate command should succeed: {}",
+        String::from_utf8_lossy(&activate_output.stderr)
+    );
+    assert_output_contains(&activate_output, "activated");
 
     // Test status shows active environment
-    let status_output = test_env
-        .runcept_cmd()
-        .args(["status"])
-        .output()
-        .expect("Failed to get status");
-
+    let status_output = test_env.status();
     assert!(
         status_output.status.success(),
         "Status command should succeed"
@@ -44,22 +42,20 @@ async fn test_environment_activation_and_deactivation() {
     let status_stdout = String::from_utf8_lossy(&status_output.stdout);
     assert!(
         status_stdout.contains("test-env") || status_stdout.contains("environment"),
-        "Status should show active environment. Actual output: {}",
-        status_stdout
+        "Status should show active environment. Actual output: {status_stdout}"
     );
 
     // Test deactivation
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["deactivate"]);
-    assert_success_with_output(cmd, "deactivated");
+    let deactivate_output = test_env.deactivate_environment();
+    assert!(
+        deactivate_output.status.success(),
+        "Deactivate command should succeed: {}",
+        String::from_utf8_lossy(&deactivate_output.stderr)
+    );
+    assert_output_contains(&deactivate_output, "deactivated");
 
     // Test status shows no active environment after deactivation
-    let status_after_deactivate = test_env
-        .runcept_cmd()
-        .args(["status"])
-        .output()
-        .expect("Failed to get status after deactivate");
-
+    let status_after_deactivate = test_env.status();
     let status_after_stdout = String::from_utf8_lossy(&status_after_deactivate.stdout);
     assert!(
         !status_after_stdout.contains("test-env")
@@ -79,10 +75,13 @@ async fn test_environment_activation_with_invalid_path() {
     .await;
 
     // Test activating non-existent environment
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", "/non/existent/path"]);
-    assert_failure_with_error(
-        cmd,
+    let activate_output = test_env.activate_environment(Some("/non/existent/path"));
+    assert!(
+        !activate_output.status.success(),
+        "Activate with invalid path should fail"
+    );
+    assert_output_contains(
+        &activate_output,
         "Failed to activate environment: Configuration error: No .runcept.toml found in or above",
     );
 
@@ -90,15 +89,21 @@ async fn test_environment_activation_with_invalid_path() {
     let empty_dir = test_env.project_dir().join("empty_project");
     tokio::fs::create_dir_all(&empty_dir).await.unwrap();
 
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &empty_dir.to_string_lossy()]);
-    assert_failure_with_error(cmd, "No .runcept.toml");
+    let activate_output = test_env.activate_environment(Some(&empty_dir.to_string_lossy()));
+    assert!(
+        !activate_output.status.success(),
+        "Activate with empty dir should fail"
+    );
+    assert_output_contains(&activate_output, "No .runcept.toml");
 
     // Test invalid environment path with helpful error
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "worker", "--environment", "/nonexistent/path"]);
-    assert_failure_with_error(
-        cmd,
+    let start_output = test_env.start_process_with_env("worker", "/nonexistent/path");
+    assert!(
+        !start_output.status.success(),
+        "Start with invalid environment should fail"
+    );
+    assert_output_contains(
+        &start_output,
         "Failed to execute command: Environment error: Invalid environment path",
     );
 }
@@ -118,23 +123,26 @@ async fn test_daemon_persistence_across_restarts() {
         .unwrap();
 
     // First daemon instance - activate environment
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    let activate_output = test_env.activate_environment(None);
+    assert!(activate_output.status.success(), "Activate should succeed");
+    assert_output_contains(&activate_output, "activated");
 
     // Manually stop the daemon and start a new one to test persistence
-    test_env.stop_daemon();
-    test_env.start_daemon().await;
+    let _ = test_env.stop_daemon().await;
+    let _ = test_env.start_daemon().await;
 
     // Check that we can reactivate the same environment after daemon restart
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    let activate_output = test_env.activate_environment(None);
+    assert!(
+        activate_output.status.success(),
+        "Activate should succeed after restart"
+    );
+    assert_output_contains(&activate_output, "activated");
 
     // Verify the environment is active
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["status"]);
-    assert_success_with_output(cmd, "environment");
+    let status_output = test_env.status();
+    assert!(status_output.status.success(), "Status should succeed");
+    assert_output_contains(&status_output, "environment");
 }
 
 #[tokio::test]
@@ -147,14 +155,20 @@ async fn test_environment_enforcement_for_process_commands() {
     .await;
 
     // Test that process commands fail when no environment is available
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["start", "worker"]);
-    assert_failure_with_error(cmd, "No .runcept.toml configuration found");
+    let start_output = test_env.start_process("worker");
+    assert!(
+        !start_output.status.success(),
+        "Start should fail without environment"
+    );
+    assert_output_contains(&start_output, "No .runcept.toml configuration found");
 
     // Test that list command fails when no environment is available
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["list"]);
-    assert_failure_with_error(cmd, "No .runcept.toml configuration found");
+    let list_output = test_env.list_processes();
+    assert!(
+        !list_output.status.success(),
+        "List should fail without environment"
+    );
+    assert_output_contains(&list_output, "No .runcept.toml configuration found");
 
     // Now create the environment and test that commands work with --environment flag
     test_env
@@ -163,31 +177,21 @@ async fn test_environment_enforcement_for_process_commands() {
         .unwrap();
 
     // Activate the environment first
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    let activate_output = test_env.activate_environment(None);
+    assert!(activate_output.status.success(), "Activate should succeed");
+    assert_output_contains(&activate_output, "activated");
 
     // Test that --environment flag works even when environment is already active
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args([
-        "start",
-        "test-process",
-        "--environment",
-        &test_env.project_dir().to_string_lossy(),
-    ]);
-    assert_success_with_output(cmd, "started");
+    let start_output =
+        test_env.start_process_with_env("test-process", &test_env.project_dir().to_string_lossy());
+    assert!(
+        start_output.status.success(),
+        "Start with environment override should succeed"
+    );
+    assert_output_contains(&start_output, "started");
 
     // Test list with environment override
-    let list_output = test_env
-        .runcept_cmd()
-        .args([
-            "list",
-            "--environment",
-            &test_env.project_dir().to_string_lossy(),
-        ])
-        .output()
-        .expect("Failed to list processes with environment override");
-
+    let list_output = test_env.list_processes_with_env(&test_env.project_dir().to_string_lossy());
     assert!(
         list_output.status.success(),
         "List with environment override should succeed"
@@ -200,14 +204,13 @@ async fn test_environment_enforcement_for_process_commands() {
     );
 
     // Stop process with environment override
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args([
-        "stop",
-        "test-process",
-        "--environment",
-        &test_env.project_dir().to_string_lossy(),
-    ]);
-    assert_success_with_output(cmd, "stopped");
+    let stop_output =
+        test_env.stop_process_with_env("test-process", &test_env.project_dir().to_string_lossy());
+    assert!(
+        stop_output.status.success(),
+        "Stop with environment override should succeed"
+    );
+    assert_output_contains(&stop_output, "stopped");
 }
 
 #[tokio::test]
@@ -226,18 +229,17 @@ async fn test_environment_activation_without_daemon() {
         .unwrap();
 
     // Test activation when daemon is not running
-    let activate_output = test_env
-        .runcept_cmd()
-        .args(["activate", &test_env.project_dir().to_string_lossy()])
-        .output()
-        .expect("Failed to execute activate command");
+    let activate_output = test_env.activate_environment(None);
 
     // Should either start daemon automatically or fail gracefully
     if activate_output.status.success() {
         // If activation succeeds, daemon should have auto-started
-        let mut cmd = test_env.runcept_cmd();
-        cmd.args(["daemon", "status"]);
-        assert_success_with_output(cmd, "running");
+        let daemon_status_output = test_env.daemon_status();
+        assert!(
+            daemon_status_output.status.success(),
+            "Daemon status should succeed"
+        );
+        assert_output_contains(&daemon_status_output, "running");
     } else {
         // If activation fails, should provide helpful error message
         let stderr = String::from_utf8_lossy(&activate_output.stderr);
@@ -258,11 +260,7 @@ async fn test_status_command_without_active_environment() {
     .await;
 
     // Test status when no environment is active
-    let status_output = test_env
-        .runcept_cmd()
-        .args(["status"])
-        .output()
-        .expect("Failed to get status");
+    let status_output = test_env.status();
 
     assert!(
         status_output.status.success(),
@@ -316,31 +314,33 @@ auto_restart = false
         .unwrap();
 
     // Activate first environment
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    let activate_output = test_env.activate_environment(None);
+    assert!(
+        activate_output.status.success(),
+        "First activate should succeed"
+    );
+    assert_output_contains(&activate_output, "activated");
 
     // Verify first environment is active
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["status"]);
-    assert_success_with_output(cmd, "first-env");
+    let status_output = test_env.status();
+    assert!(status_output.status.success(), "Status should succeed");
+    assert_output_contains(&status_output, "first-env");
 
     // Switch to second environment
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &env2_dir.to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    let activate_output = test_env.activate_environment(Some(&env2_dir.to_string_lossy()));
+    assert!(
+        activate_output.status.success(),
+        "Second activate should succeed"
+    );
+    assert_output_contains(&activate_output, "activated");
 
     // Verify second environment is now active
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["status"]);
-    assert_success_with_output(cmd, "second-env");
+    let status_output = test_env.status();
+    assert!(status_output.status.success(), "Status should succeed");
+    assert_output_contains(&status_output, "second-env");
 
     // Test that process commands work with the new environment
-    let list_output = test_env
-        .runcept_cmd()
-        .args(["list", "--environment", &env2_dir.to_string_lossy()])
-        .output()
-        .expect("Failed to list processes");
+    let list_output = test_env.list_processes_with_env(&env2_dir.to_string_lossy());
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     assert!(
@@ -365,14 +365,14 @@ async fn test_database_functionality_with_environment() {
         .unwrap();
 
     // Activate environment to trigger database operations
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["activate", &test_env.project_dir().to_string_lossy()]);
-    assert_success_with_output(cmd, "activated");
+    let activate_output = test_env.activate_environment(None);
+    assert!(activate_output.status.success(), "Activate should succeed");
+    assert_output_contains(&activate_output, "activated");
 
     // Verify environment is active
-    let mut cmd = test_env.runcept_cmd();
-    cmd.args(["status"]);
-    assert_success_with_output(cmd, "test-env");
+    let status_output = test_env.status();
+    assert!(status_output.status.success(), "Status should succeed");
+    assert_output_contains(&status_output, "test-env");
 
     // Check that runcept directory exists and has expected structure
     let runcept_dir = test_env.home_dir().join(".runcept");
@@ -387,7 +387,7 @@ async fn test_database_functionality_with_environment() {
     );
 
     // Stop daemon and verify directory persists
-    test_env.stop_daemon();
+    let _ = test_env.stop_daemon().await;
 
     // Runcept directory should persist after shutdown
     assert!(
