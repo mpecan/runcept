@@ -5,6 +5,7 @@
 
 use assert_cmd::Command;
 use std::collections::HashMap;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::{Mutex, Once};
@@ -17,13 +18,20 @@ static INIT: Once = Once::new();
 static BINARY_PATHS: Mutex<Option<HashMap<String, PathBuf>>> = Mutex::new(None);
 
 /// Build binaries once and cache their paths for all tests
+/// This version is compatible with coverage collection tools
 pub fn ensure_binaries_built() {
     INIT.call_once(|| {
         println!("Building binaries once for all tests...");
 
-        // Build the project
-        let build_output = std::process::Command::new("cargo")
-            .args(["build", "--bins"])
+        // Create build command with proper environment inheritance
+        let mut build_cmd = std::process::Command::new("cargo");
+        build_cmd.args(["build", "--bins"]);
+
+        // Inherit coverage-related environment variables
+        inherit_coverage_env(&mut build_cmd);
+
+        // Execute the build
+        let build_output = build_cmd
             .output()
             .expect("Failed to build binaries");
 
@@ -62,15 +70,69 @@ pub fn ensure_binaries_built() {
         }
 
         *BINARY_PATHS.lock().unwrap() = Some(paths);
-        println!("Binaries built and cached successfully");
+
+        let coverage_info = if is_coverage_enabled() { " (with coverage instrumentation)" } else { "" };
+        println!("Binaries built and cached successfully{}", coverage_info);
     });
+}
+
+/// Inherit coverage-related environment variables to the build process
+fn inherit_coverage_env(cmd: &mut std::process::Command) {
+    // Coverage-related environment variables that need to be passed through
+    let coverage_vars = [
+        "RUSTFLAGS",
+        "LLVM_PROFILE_FILE",
+        "CARGO_INCREMENTAL",
+        "RUSTDOCFLAGS",
+        // Additional variables that cargo-llvm-cov might set
+        "CARGO_LLVM_COV",
+        "CARGO_LLVM_COV_TARGET_DIR",
+    ];
+
+    for var in &coverage_vars {
+        if let Ok(value) = env::var(var) {
+            cmd.env(var, value);
+        }
+    }
+
+    // Ensure we inherit the current environment as well
+    // This catches any other coverage-related variables we might miss
+    for (key, value) in env::vars() {
+        if key.starts_with("LLVM_PROFILE") ||
+            key.starts_with("GCOV_") ||
+            key.contains("COV") && key.contains("CARGO") {
+            cmd.env(key, value);
+        }
+    }
+}
+
+/// Check if coverage collection is enabled
+fn is_coverage_enabled() -> bool {
+    env::var("LLVM_PROFILE_FILE").is_ok() ||
+        env::var("RUSTFLAGS").unwrap_or_default().contains("instrument-coverage") ||
+        env::var("CARGO_LLVM_COV").is_ok()
 }
 
 /// Get the path to a binary
 pub fn get_binary_path(name: &str) -> PathBuf {
+   get_binary_path_checked(name).unwrap()
+}
+
+/// Enhanced version with better error handling and logging
+pub fn get_binary_path_checked(name: &str) -> Result<PathBuf, String> {
     ensure_binaries_built();
     let paths = BINARY_PATHS.lock().unwrap();
-    paths.as_ref().unwrap().get(name).unwrap().clone()
+
+    match paths.as_ref().and_then(|p| p.get(name)) {
+        Some(path) => {
+            if path.exists() {
+                Ok(path.clone())
+            } else {
+                Err(format!("Binary '{}' was built but no longer exists at {}", name, path.display()))
+            }
+        },
+        None => Err(format!("Binary '{}' not found in built binaries", name))
+    }
 }
 
 /// Centralized test environment for all integration tests

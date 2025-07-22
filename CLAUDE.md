@@ -25,8 +25,15 @@ cargo test process::tests
 # Run integration tests
 cargo test --test integration
 
-# Check test coverage (requires cargo-tarpaulin)
-cargo tarpaulin --out Html
+# Check test coverage (requires cargo-llvm-cov)
+cargo llvm-cov --html
+
+# Run coverage for all tests including integration tests
+cargo llvm-cov --html --all-targets
+
+# Generate coverage report in different formats
+cargo llvm-cov --lcov --output-path coverage.lcov
+cargo llvm-cov --json --output-path coverage.json
 ```
 
 ### Build and Lint Commands
