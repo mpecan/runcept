@@ -497,7 +497,6 @@ mod tests {
     async fn test_cleanup_old_activities() {
         let tracker = ActivityTracker::new();
 
-
         // Create an old activity using a safe approach
         let old_instant = {
             let now = Instant::now();
