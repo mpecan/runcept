@@ -157,7 +157,7 @@ async fn run_daemon_process(args: Vec<String>) {
 
     // Create server configuration
     let server_config = ServerConfig {
-        socket_path,
+        socket_path: socket_path.into(),
         global_config,
         database,
     };

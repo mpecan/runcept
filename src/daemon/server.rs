@@ -8,16 +8,16 @@ use crate::database::Database;
 use crate::error::{Result, RunceptError};
 use crate::process::DefaultProcessOrchestrationService;
 use crate::scheduler::InactivityScheduler;
-use std::path::PathBuf;
+
+use crate::ipc::{IpcListener, IpcPath, create_listener};
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::net::UnixListener;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{error, info};
 
 /// Configuration for the daemon server
 pub struct ServerConfig {
-    pub socket_path: PathBuf,
+    pub socket_path: IpcPath,
     pub global_config: GlobalConfig,
     pub database: Option<Database>,
 }
@@ -135,18 +135,20 @@ impl DaemonServer {
             })?;
         }
 
-        // Create Unix socket listener
-        let listener = UnixListener::bind(&self.config.socket_path).map_err(|e| {
-            RunceptError::IoError(std::io::Error::other(format!(
-                "Failed to bind to socket {}: {}",
-                self.config.socket_path.display(),
-                e
-            )))
-        })?;
+        // Create IPC listener
+        let mut listener = create_listener(&self.config.socket_path)
+            .await
+            .map_err(|e| {
+                RunceptError::IoError(std::io::Error::other(format!(
+                    "Failed to bind to socket {}: {}",
+                    self.config.socket_path.as_str(),
+                    e
+                )))
+            })?;
 
         info!(
             "Daemon server listening on {}",
-            self.config.socket_path.display()
+            self.config.socket_path.as_str()
         );
 
         // Create handler instances
@@ -186,7 +188,7 @@ impl DaemonServer {
                 // Handle new connections
                 result = listener.accept() => {
                     match result {
-                        Ok((stream, _)) => {
+                        Ok(stream) => {
                             let processor = request_processor.clone();
                             tokio::spawn(async move {
                                 if let Err(e) = ConnectionHandler::handle_connection(
@@ -409,7 +411,7 @@ mod tests {
         let database = create_test_database().await;
 
         let config = ServerConfig {
-            socket_path: socket_path.clone(),
+            socket_path: socket_path.clone().into(),
             global_config: GlobalConfig::default(),
             database: Some(database),
         };

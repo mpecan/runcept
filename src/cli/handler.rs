@@ -285,7 +285,7 @@ impl CliHandler {
         let mut cmd = Command::new(&current_exe);
         cmd.arg("daemon-process") // Special internal command for daemon process
             .arg("--socket")
-            .arg(&self.client.socket_path);
+            .arg(self.client.socket_path.display());
 
         if !foreground {
             // Run in background

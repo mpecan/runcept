@@ -103,14 +103,17 @@ impl DaemonAutoSpawner {
 }
 
 /// Convenience function for CLI usage
-pub async fn ensure_daemon_running_for_cli(socket_path: PathBuf, verbose: bool) -> Result<()> {
-    let spawner = DaemonAutoSpawner::new(socket_path, verbose);
+pub async fn ensure_daemon_running_for_cli(
+    socket_path: crate::ipc::IpcPath,
+    verbose: bool,
+) -> Result<()> {
+    let spawner = DaemonAutoSpawner::new(socket_path.to_path_buf(), verbose);
     spawner.ensure_daemon_running().await
 }
 
 /// Convenience function for MCP usage
-pub async fn ensure_daemon_running_for_mcp(socket_path: PathBuf) -> Result<()> {
-    let spawner = DaemonAutoSpawner::new(socket_path, false); // MCP doesn't output to stdout
+pub async fn ensure_daemon_running_for_mcp(socket_path: crate::ipc::IpcPath) -> Result<()> {
+    let spawner = DaemonAutoSpawner::new(socket_path.to_path_buf(), false); // MCP doesn't output to stdout
     spawner.ensure_daemon_running().await
 }
 
@@ -202,7 +205,7 @@ mod tests {
 
         // This will likely fail because the daemon isn't actually running,
         // but we can test that the function exists and handles the error gracefully
-        let result = ensure_daemon_running_for_cli(socket_path, true).await;
+        let result = ensure_daemon_running_for_cli(socket_path.into(), true).await;
 
         // We expect this to fail since no daemon is running
         assert!(result.is_err());
@@ -223,7 +226,7 @@ mod tests {
 
         // This will likely fail because the daemon isn't actually running,
         // but we can test that the function exists and handles the error gracefully
-        let result = ensure_daemon_running_for_mcp(socket_path).await;
+        let result = ensure_daemon_running_for_mcp(socket_path.into()).await;
 
         // We expect this to fail since no daemon is running
         assert!(result.is_err());

@@ -46,7 +46,7 @@ impl RunceptMcpServer {
 
         // Ensure daemon is running at startup
         let config_dir = crate::config::global::get_config_dir()?;
-        let socket_path = config_dir.join("daemon.sock");
+        let socket_path = crate::ipc::IpcPath::new(config_dir.join("daemon.sock"));
 
         if let Err(e) = crate::daemon::ensure_daemon_running_for_mcp(socket_path).await {
             return Err(RunceptError::ProcessError(format!(

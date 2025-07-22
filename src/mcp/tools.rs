@@ -1,4 +1,5 @@
 use crate::cli::commands::{DaemonRequest, DaemonResponse};
+use crate::ipc::{IpcPath, connect};
 use rmcp::handler::server::tool::Parameters;
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, handler::server::router::tool::ToolRouter,
@@ -6,7 +7,6 @@ use rmcp::{
 };
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio::sync::RwLock;
 
 /// Helper function to send request to daemon and get response
@@ -17,24 +17,23 @@ async fn send_daemon_request(
 
     log_debug("mcp", &format!("Sending daemon request: {request:?}"), None);
 
-    let config_dir = crate::config::global::get_config_dir().map_err(|e| {
-        let err = McpError::internal_error(format!("Failed to get config dir: {e}"), None);
-        log_error("mcp", &format!("Config dir error: {err}"), None);
+    let socket_path = IpcPath::default_path().map_err(|e| {
+        let err = McpError::internal_error(format!("Failed to get socket path: {e}"), None);
+        log_error("mcp", &format!("Socket path error: {err}"), None);
         err
     })?;
-    let socket_path = config_dir.join("daemon.sock");
 
     log_debug(
         "mcp",
-        &format!("Connecting to daemon socket: {}", socket_path.display()),
+        &format!("Connecting to daemon socket: {}", socket_path.as_str()),
         None,
     );
 
-    let stream = UnixStream::connect(&socket_path).await.map_err(|e| {
+    let stream = connect(&socket_path).await.map_err(|e| {
         let err = McpError::internal_error(format!("Failed to connect to daemon: {e}"), None);
         log_error(
             "mcp",
-            &format!("Connection error to {}: {}", socket_path.display(), err),
+            &format!("Connection error to {}: {}", socket_path.as_str(), err),
             None,
         );
         err

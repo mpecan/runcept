@@ -260,7 +260,22 @@ impl DefaultProcessMonitoringService {
 mod tests {
     use super::*;
     use crate::test_utils::{MockProcessRepository, ProcessRecordBuilder, TempDirFixture};
+    #[cfg(unix)]
     use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
+
+    // Helper function to create ExitStatus for tests
+    fn create_exit_status(code: i32) -> std::process::ExitStatus {
+        #[cfg(unix)]
+        {
+            std::process::ExitStatus::from_raw(code)
+        }
+        #[cfg(windows)]
+        {
+            std::process::ExitStatus::from_raw(code as u32)
+        }
+    }
     use tokio::sync::broadcast;
 
     #[tokio::test]
@@ -284,7 +299,7 @@ mod tests {
         let notification = ProcessExitNotification {
             process_name: "test-process".to_string(),
             environment_id: "test-env".to_string(),
-            exit_status: std::process::ExitStatus::from_raw(0),
+            exit_status: create_exit_status(0),
         };
 
         service
@@ -320,7 +335,7 @@ mod tests {
         let notification = ProcessExitNotification {
             process_name: "test-process".to_string(),
             environment_id: "test-env".to_string(),
-            exit_status: std::process::ExitStatus::from_raw(0), // Success
+            exit_status: create_exit_status(0), // Success
         };
 
         service.exit_notification_tx.send(notification).unwrap();
@@ -367,7 +382,7 @@ mod tests {
         let notification = ProcessExitNotification {
             process_name: "test-process".to_string(),
             environment_id: "test-env".to_string(),
-            exit_status: std::process::ExitStatus::from_raw(256), // Failure (exit code 1)
+            exit_status: create_exit_status(256), // Failure (exit code 1)
         };
 
         service.exit_notification_tx.send(notification).unwrap();
@@ -406,7 +421,7 @@ mod tests {
         let notification = ProcessExitNotification {
             process_name: "test-process".to_string(),
             environment_id: "test-env".to_string(),
-            exit_status: std::process::ExitStatus::from_raw(256), // Would normally be "crashed"
+            exit_status: create_exit_status(256), // Would normally be "crashed"
         };
 
         service.exit_notification_tx.send(notification).unwrap();

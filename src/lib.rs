@@ -3,6 +3,7 @@ pub mod config;
 pub mod daemon;
 pub mod database;
 pub mod error;
+pub mod ipc;
 pub mod logging;
 pub mod mcp;
 pub mod process;

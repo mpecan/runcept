@@ -1,15 +1,18 @@
 use crate::cli::commands::{DaemonRequest, DaemonResponse};
 use crate::error::{Result, RunceptError};
+use crate::ipc::PlatformStream;
 use crate::logging::{log_debug, log_error, log_info};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 /// Handles Unix socket connection processing
 pub struct ConnectionHandler;
 
 impl ConnectionHandler {
     /// Handle a single client connection
-    pub async fn handle_connection<F, Fut>(stream: UnixStream, request_processor: F) -> Result<()>
+    pub async fn handle_connection<F, Fut>(
+        stream: PlatformStream,
+        request_processor: F,
+    ) -> Result<()>
     where
         F: FnOnce(DaemonRequest) -> Fut,
         Fut: std::future::Future<Output = Result<DaemonResponse>>,
@@ -123,7 +126,7 @@ impl ConnectionHandler {
     /// Helper method to write response to stream
     #[cfg(test)]
     pub async fn write_response_to_stream(
-        mut stream: UnixStream,
+        mut stream: PlatformStream,
         response: &DaemonResponse,
     ) -> Result<()> {
         let response_json = Self::serialize_response(response)?;

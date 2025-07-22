@@ -3,7 +3,7 @@ use crate::config::EnvironmentManager;
 use crate::error::{Result, RunceptError};
 use crate::process::DefaultProcessOrchestrationService;
 use crate::scheduler::InactivityScheduler;
-use std::path::PathBuf;
+
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, mpsc};
@@ -16,7 +16,7 @@ pub struct DaemonHandles {
     inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
     #[allow(dead_code)]
     current_environment_id: Arc<RwLock<Option<String>>>,
-    socket_path: PathBuf,
+    socket_path: crate::ipc::IpcPath,
     start_time: SystemTime,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
@@ -27,7 +27,7 @@ impl DaemonHandles {
         environment_manager: Arc<RwLock<EnvironmentManager>>,
         inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
         current_environment_id: Arc<RwLock<Option<String>>>,
-        socket_path: PathBuf,
+        socket_path: crate::ipc::IpcPath,
         start_time: SystemTime,
         shutdown_tx: Option<mpsc::Sender<()>>,
     ) -> Self {
@@ -63,7 +63,7 @@ impl DaemonHandles {
             running: true,
             uptime: uptime_str,
             version: env!("CARGO_PKG_VERSION").to_string(),
-            socket_path: self.socket_path.to_string_lossy().to_string(),
+            socket_path: self.socket_path.display(),
             total_processes,
             active_environments: environment_count,
             memory_usage: None, // TODO: Implement memory usage tracking

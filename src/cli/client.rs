@@ -1,21 +1,21 @@
 use crate::cli::commands::{DaemonRequest, DaemonResponse};
 use crate::error::{Result, RunceptError};
+use crate::ipc::{IpcPath, IpcStream, connect};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
 use tokio::time::timeout;
 
 /// Client for communicating with the runcept daemon
 pub struct DaemonClient {
-    pub socket_path: PathBuf,
+    pub socket_path: IpcPath,
     pub timeout: Duration,
 }
 
 impl DaemonClient {
     pub fn new(socket_path: PathBuf) -> Self {
         Self {
-            socket_path,
+            socket_path: IpcPath::from(socket_path),
             timeout: Duration::from_secs(30), // 30 second timeout
         }
     }
@@ -33,13 +33,13 @@ impl DaemonClient {
         })?;
 
         // Connect to daemon socket
-        let stream = timeout(self.timeout, UnixStream::connect(&self.socket_path))
+        let stream = timeout(self.timeout, connect(&self.socket_path))
             .await
             .map_err(|_| RunceptError::ConnectionError("Timeout connecting to daemon".to_string()))?
             .map_err(|e| {
                 RunceptError::ConnectionError(format!(
-                    "Failed to connect to daemon at {:?}: {e}",
-                    self.socket_path
+                    "Failed to connect to daemon at {}: {e}",
+                    self.socket_path.as_str()
                 ))
             })?;
 
@@ -47,43 +47,28 @@ impl DaemonClient {
 
         // Send request
         let request_data = format!("{request_json}\n");
-        timeout(self.timeout, writer.write_all(request_data.as_bytes()))
+        writer
+            .write_all(request_data.as_bytes())
             .await
-            .map_err(|_| RunceptError::ConnectionError("Timeout sending request".to_string()))?
             .map_err(|e| RunceptError::ConnectionError(format!("Failed to send request: {e}")))?;
 
         // Read response
-        let mut buffer = Vec::new();
-        let mut temp_buf = [0; 1024];
+        let mut response_buffer = Vec::new();
+        reader
+            .read_to_end(&mut response_buffer)
+            .await
+            .map_err(|e| RunceptError::ConnectionError(format!("Failed to read response: {e}")))?;
 
-        loop {
-            let bytes_read = timeout(self.timeout, reader.read(&mut temp_buf))
-                .await
-                .map_err(|_| RunceptError::ConnectionError("Timeout reading response".to_string()))?
-                .map_err(|e| {
-                    RunceptError::ConnectionError(format!("Failed to read response: {e}"))
-                })?;
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            buffer.extend_from_slice(&temp_buf[..bytes_read]);
-
-            // Check if we have a complete JSON response (ends with newline)
-            if buffer.ends_with(b"\n") {
-                break;
-            }
-        }
-
-        // Parse response
-        let response_str = String::from_utf8(buffer).map_err(|e| {
+        let response_str = String::from_utf8(response_buffer).map_err(|e| {
             RunceptError::SerializationError(format!("Invalid UTF-8 in response: {e}"))
         })?;
 
-        let response_str = response_str.trim();
-        let response: DaemonResponse = serde_json::from_str(response_str).map_err(|e| {
-            RunceptError::SerializationError(format!("Failed to parse response: {e}"))
+        // Parse response
+        let response: DaemonResponse = serde_json::from_str(&response_str).map_err(|e| {
+            RunceptError::SerializationError(format!(
+                "Failed to deserialize response '{}': {e}",
+                response_str.trim()
+            ))
         })?;
 
         Ok(response)
@@ -92,11 +77,7 @@ impl DaemonClient {
     /// Check if the daemon is running by trying to connect
     pub async fn is_daemon_running(&self) -> bool {
         matches!(
-            timeout(
-                Duration::from_secs(1),
-                UnixStream::connect(&self.socket_path),
-            )
-            .await,
+            timeout(Duration::from_secs(1), connect(&self.socket_path),).await,
             Ok(Ok(_))
         )
     }
@@ -119,13 +100,18 @@ impl DaemonClient {
 
     /// Get the socket path for the daemon
     pub fn get_socket_path(&self) -> Result<PathBuf> {
-        Ok(self.socket_path.clone())
+        Ok(self.socket_path.as_path().to_path_buf())
     }
 }
 
 impl Default for DaemonClient {
     fn default() -> Self {
-        Self::new(get_default_socket_path())
+        let socket_path =
+            IpcPath::default_path().unwrap_or_else(|_| IpcPath::from(get_default_socket_path()));
+        Self {
+            socket_path,
+            timeout: Duration::from_secs(30),
+        }
     }
 }
 

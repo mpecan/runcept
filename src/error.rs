@@ -38,6 +38,9 @@ pub enum RunceptError {
     #[error("System error: {0}")]
     SystemError(String),
 
+    #[error("Platform error: {0}")]
+    PlatformError(String),
+
     #[error("Timeout error: {0}")]
     TimeoutError(String),
 
@@ -83,6 +86,7 @@ impl RunceptError {
             RunceptError::MigrationError(_) => "MIGRATION_ERROR",
             RunceptError::HttpError(_) => "HTTP_ERROR",
             RunceptError::SystemError(_) => "SYSTEM_ERROR",
+            RunceptError::PlatformError(_) => "PLATFORM_ERROR",
             RunceptError::TimeoutError(_) => "TIMEOUT_ERROR",
             RunceptError::ConnectionError(_) => "CONNECTION_ERROR",
             RunceptError::SerializationError(_) => "SERIALIZATION_ERROR",
