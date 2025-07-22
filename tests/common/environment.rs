@@ -58,7 +58,12 @@ pub fn ensure_binaries_built() {
 
         // Store binary paths
         let mut paths = HashMap::new();
-        paths.insert("runcept".to_string(), debug_dir.join("runcept"));
+        let binary_name = if cfg!(windows) {
+            "runcept.exe"
+        } else {
+            "runcept"
+        };
+        paths.insert("runcept".to_string(), debug_dir.join(binary_name));
 
         // Verify binaries exist
         for (name, path) in &paths {

@@ -3,31 +3,43 @@
 
 /// Common test configuration fixtures and templates
 /// Basic test environment configuration
-pub fn basic_test_config() -> &'static str {
-    r#"
+pub fn basic_test_config() -> String {
+    let echo_cmd = if cfg!(windows) {
+        "echo Hello World"
+    } else {
+        "echo 'Hello World'"
+    };
+    
+    format!(r#"
 [environment]
 name = "test-env"
 
 [processes.test-process]
 name = "test-process"
-command = "echo 'Hello World'"
+command = "{echo_cmd}"
 auto_restart = false
-"#
+"#)
 }
 
 /// Configuration with health check (will fail)
-pub fn failing_health_check_config() -> &'static str {
-    r#"
+pub fn failing_health_check_config() -> String {
+    let sleep_cmd = if cfg!(windows) {
+        "timeout /t 30 /nobreak"
+    } else {
+        "sleep 30"
+    };
+    
+    format!(r#"
 [environment]
 name = "health-check-env"
 
 [processes.health-check-process]
 name = "health-check-process"
-command = "sleep 30"
+command = "{sleep_cmd}"
 health_check_url = "http://localhost:9999/health"
 health_check_interval = 1
 auto_restart = false
-"#
+"#)
 }
 
 /// Configuration with successful health check
@@ -48,85 +60,115 @@ auto_restart = false
 }
 
 /// Multi-process configuration
-pub fn multi_process_config() -> &'static str {
-    r#"
+pub fn multi_process_config() -> String {
+    let (sleep_10, sleep_5, echo_done) = if cfg!(windows) {
+        ("timeout /t 10 /nobreak", "timeout /t 5 /nobreak", "echo Done")
+    } else {
+        ("sleep 10", "sleep 5", "echo 'Done'")
+    };
+    
+    format!(r#"
 [environment]
 name = "multi-env"
 
 [processes.worker-1]
 name = "worker-1"
-command = "sleep 10"
+command = "{sleep_10}"
 auto_restart = false
 
 [processes.worker-2]
 name = "worker-2"
-command = "sleep 5"
+command = "{sleep_5}"
 auto_restart = false
 
 [processes.quick-task]
 name = "quick-task"
-command = "echo 'Done'"
+command = "{echo_done}"
 auto_restart = false
-"#
+"#)
 }
 
 /// Configuration with auto-restart enabled
-pub fn auto_restart_config() -> &'static str {
-    r#"
+pub fn auto_restart_config() -> String {
+    let restart_cmd = if cfg!(windows) {
+        "cmd /c \"echo Starting && timeout /t 2 /nobreak && exit 1\""
+    } else {
+        "bash -c 'echo Starting; sleep 2; exit 1'"
+    };
+    
+    format!(r#"
 [environment]
 name = "restart-env"
 
 [processes.auto-restart-process]
 name = "auto-restart-process"
-command = "bash -c 'echo Starting; sleep 2; exit 1'"
+command = "{restart_cmd}"
 auto_restart = true
 restart_delay = 1000
 max_restarts = 3
-"#
+"#)
 }
 
 /// Configuration with working directory
-pub fn working_dir_config() -> &'static str {
-    r#"
+pub fn working_dir_config() -> String {
+    let pwd_cmd = if cfg!(windows) {
+        "cd"
+    } else {
+        "pwd"
+    };
+    
+    format!(r#"
 [environment]
 name = "working-dir-env"
 
 [processes.pwd-process]
 name = "pwd-process"
-command = "pwd"
+command = "{pwd_cmd}"
 working_dir = "src"
 auto_restart = false
-"#
+"#)
 }
 
 /// Configuration with environment variables
-pub fn env_vars_config() -> &'static str {
-    r#"
+pub fn env_vars_config() -> String {
+    let env_cmd = if cfg!(windows) {
+        "cmd /c \"set | findstr TEST_VAR\""
+    } else {
+        "env | grep TEST_VAR"
+    };
+    
+    format!(r#"
 [environment]
 name = "env-vars-env"
 
 [processes.env-process]
 name = "env-process"
-command = "env | grep TEST_VAR"
+command = "{env_cmd}"
 auto_restart = false
 
 [processes.env-process.env]
 TEST_VAR = "test-value"
 ANOTHER_VAR = "another-value"
-"#
+"#)
 }
 
 /// Configuration for testing process groups (parent spawns children)
-pub fn process_group_config() -> &'static str {
-    r#"
+pub fn process_group_config() -> String {
+    let parent_cmd = if cfg!(windows) {
+        "cmd /c \"echo Parent PID: %RANDOM% && start /b timeout /t 2 /nobreak && start /b timeout /t 4 /nobreak && timeout /t 5 /nobreak\""
+    } else {
+        "bash -c 'echo Parent PID: $$; sleep 2 && sleep 4 && wait'"
+    };
+    
+    format!(r#"
 [environment]
 name = "process-group-env"
 
 [processes.parent-process]
 name = "parent-process"
-command = "bash -c 'echo Parent PID: $$; sleep 2 & sleep 4 & wait'"
+command = "{parent_cmd}"
 auto_restart = false
-"#
+"#)
 }
 
 /// Configuration for MCP testing
@@ -159,34 +201,44 @@ name = "empty-env"
 
 /// Configuration with TCP health check
 pub fn tcp_health_check_config(port: u16) -> String {
-    format!(
-        r#"
+    let tcp_cmd = if cfg!(windows) {
+        format!("powershell -Command \"$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, {port}); $listener.Start(); Start-Sleep 30; $listener.Stop()\"")
+    } else {
+        format!("nc -l {port}")
+    };
+    
+    format!(r#"
 [environment]
 name = "tcp-env"
 
 [processes.tcp-server]
 name = "tcp-server"
-command = "nc -l {port}"
+command = "{tcp_cmd}"
 health_check_url = "tcp://localhost:{port}"
 health_check_interval = 1
 auto_restart = false
-"#
-    )
+"#)
 }
 
 /// Configuration with command health check
-pub fn command_health_check_config() -> &'static str {
-    r#"
+pub fn command_health_check_config() -> String {
+    let (sleep_cmd, health_cmd) = if cfg!(windows) {
+        ("timeout /t 10 /nobreak", "cmd://echo healthy")
+    } else {
+        ("sleep 10", "cmd://echo 'healthy'")
+    };
+    
+    format!(r#"
 [environment]
 name = "command-env"
 
 [processes.command-process]
 name = "command-process"
-command = "sleep 10"
-health_check_url = "cmd://echo 'healthy'"
+command = "{sleep_cmd}"
+health_check_url = "{health_cmd}"
 health_check_interval = 1
 auto_restart = false
-"#
+"#)
 }
 
 /// Get a random available port for testing
