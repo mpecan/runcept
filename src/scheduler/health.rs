@@ -219,7 +219,7 @@ impl<H: HealthCheckTrait> HealthMonitor<H> {
 mod tests {
     use super::*;
     use crate::process::{Process, ProcessStatus};
-    use crate::test_utils::MockHealthCheckService;
+    use crate::process::{MockHealthCheckTrait, HealthCheckResult, HealthCheckType};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -243,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_monitor_lifecycle() {
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
         // Initially not running
@@ -266,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_remove_process() {
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
         let process = create_test_process("test", Some("http://localhost:8080/health".to_string()));
@@ -289,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_without_health_check() {
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
         let process = create_test_process("test", None);
@@ -308,7 +308,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_tcp_health_check() {
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mut mock_health = MockHealthCheckTrait::new();
+        mock_health
+            .expect_execute_health_check()
+            .returning(|_| {
+                Ok(HealthCheckResult {
+                    check_type: HealthCheckType::Http {
+                        url: "http://localhost:8080".to_string(),
+                        expected_status: 200,
+                    },
+                    success: true,
+                    message: "Mock health check passed".to_string(),
+                    duration_ms: 10,
+                    timestamp: chrono::Utc::now(),
+                })
+            });
+        let mock_health = Arc::new(mock_health);
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
         let process = create_test_process("test", Some("tcp://127.0.0.1:22".to_string()));
@@ -327,7 +342,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_command_health_check() {
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mut mock_health = MockHealthCheckTrait::new();
+        mock_health
+            .expect_execute_health_check()
+            .returning(|_| {
+                Ok(HealthCheckResult {
+                    check_type: HealthCheckType::Http {
+                        url: "http://localhost:8080".to_string(),
+                        expected_status: 200,
+                    },
+                    success: true,
+                    message: "Mock health check passed".to_string(),
+                    duration_ms: 10,
+                    timestamp: chrono::Utc::now(),
+                })
+            });
+        let mock_health = Arc::new(mock_health);
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
         let process = create_test_process("test", Some("cmd://echo 'healthy'".to_string()));
@@ -345,7 +375,22 @@ mod tests {
     #[tokio::test]
     async fn test_failing_command_health_check() {
         // Configure mock to return failure
-        let mock_health = Arc::new(MockHealthCheckService::new().with_success(false));
+        let mut mock_health = MockHealthCheckTrait::new();
+        mock_health
+            .expect_execute_health_check()
+            .returning(|_| {
+                Ok(HealthCheckResult {
+                    check_type: HealthCheckType::Http {
+                        url: "http://localhost:8080".to_string(),
+                        expected_status: 200,
+                    },
+                    success: false,
+                    message: "Mock health check failed".to_string(),
+                    duration_ms: 10,
+                    timestamp: chrono::Utc::now(),
+                })
+            });
+        let mock_health = Arc::new(mock_health);
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
         let process = create_test_process("test", Some("cmd://exit 1".to_string()));
@@ -363,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_all_health_status() {
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
         let process1 = create_test_process("test1", Some("cmd://echo 'healthy'".to_string()));
@@ -380,11 +425,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_running_process_health_check() {
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
-        let mut process = create_test_process("test", Some("cmd://echo 'healthy'".to_string()));
-        process.transition_to(ProcessStatus::Stopped);
+        let mut process = Process::new(
+            "test".to_string(),
+            "echo test".to_string(),
+            "/tmp".to_string(),
+            "test-env".to_string(),
+        );
+        process.set_health_check("cmd://echo 'healthy'".to_string(), 30);
+        // Keep process in Stopped state (default)
 
         monitor.add_process(&process).await.unwrap();
 

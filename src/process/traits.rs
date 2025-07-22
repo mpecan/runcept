@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 /// This trait abstracts database operations for process management,
 /// enabling testing with mock implementations and providing a clean
 /// interface for process persistence.
+#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait ProcessRepositoryTrait: Send + Sync {
     // CRUD Operations
@@ -110,6 +111,7 @@ pub trait ProcessRepositoryTrait: Send + Sync {
 /// This trait abstracts the actual process spawning operations,
 /// separating business logic from system-level process handling.
 /// Other process management operations are handled by the execution service.
+#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait ProcessRuntimeTrait: Send + Sync {
     /// Spawn a new process and return its handle
@@ -120,6 +122,7 @@ pub trait ProcessRuntimeTrait: Send + Sync {
 ///
 /// This trait abstracts health check execution, enabling different
 /// health check strategies and mock implementations for testing.
+#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait HealthCheckTrait: Send + Sync {
     /// Execute a health check for a process
