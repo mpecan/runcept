@@ -14,7 +14,7 @@ async fn test_init_creates_default_config_file() {
     .await;
 
     // Run init command in project directory
-    test_env.assert_cmd_success(&["init"], "initialized");
+    test_env.assert_cmd_success(&["init"], "Initialized");
 
     // Verify .runcept.toml was created
     let config_path = test_env.project_dir().join(".runcept.toml");
@@ -57,8 +57,8 @@ async fn test_init_with_custom_path() {
     let output = test_env.init_project(Some(&custom_dir.to_string_lossy()), false);
     assert!(output.status.success(), "Init command should succeed");
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("initialized"),
-        "Output should contain 'initialized'"
+        String::from_utf8_lossy(&output.stdout).contains("Initialized"),
+        "Output should contain 'Initialized'"
     );
 
     // Verify .runcept.toml was created in custom directory
@@ -138,8 +138,8 @@ command = "echo old"
     let output = test_env.init_project(None, true);
     assert!(output.status.success(), "Init with --force should succeed");
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("initialized"),
-        "Output should contain 'initialized'"
+        String::from_utf8_lossy(&output.stdout).contains("Initialized"),
+        "Output should contain 'Initialized'"
     );
 
     // Verify config was overwritten with new default content
@@ -170,7 +170,7 @@ async fn test_init_generated_config_is_valid_and_activatable() {
     .await;
 
     // Run init command using centralized method
-    test_env.assert_cmd_success(&["init"], "initialized");
+    test_env.assert_cmd_success(&["init"], "Initialized");
 
     // Try to activate the generated configuration
     test_env.assert_cmd_success(
@@ -210,8 +210,8 @@ async fn test_init_creates_proper_directory_structure() {
     let output = test_env.init_project(Some(&nested_path.to_string_lossy()), false);
     assert!(output.status.success(), "Init command should succeed");
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("initialized"),
-        "Output should contain 'initialized'"
+        String::from_utf8_lossy(&output.stdout).contains("Initialized"),
+        "Output should contain 'Initialized'"
     );
 
     // Verify the nested directory structure was created

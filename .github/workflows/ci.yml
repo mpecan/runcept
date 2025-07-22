@@ -15,6 +15,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Optimize compilation performance
+  CARGO_INCREMENTAL: 1
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
 
 jobs:
   # Quick formatting and linting checks
@@ -27,13 +31,42 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      
+      # Install faster linker on Linux for improved build performance
+      - name: Install lld linker (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y lld
+      
+      # Set platform-specific environment variables for optimization
+      - name: Set Linux-specific environment
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> $GITHUB_ENV
+          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
+      
+      - name: Set Windows-specific environment
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "CARGO_BUILD_JOBS=4" >> $env:GITHUB_ENV
+          echo "RUSTFLAGS=-C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
+      
+      - name: Set macOS-specific environment
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
 
       - name: Set up Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "check"
+          # Enhanced cache key with Cargo.lock hash for better invalidation
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          # Cache cargo tools to avoid repeated installations
+          cache-directories: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -58,6 +91,11 @@ jobs:
           # Test nightly only on Ubuntu to reduce costs
           - os: ubuntu-latest
             rust: nightly
+          # Test on additional platforms for better compatibility
+          - os: windows-latest
+            rust: stable
+          - os: macos-latest
+            rust: stable
     
     steps:
       - name: Checkout code
@@ -67,21 +105,57 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+      
+      # Install faster linker on Linux for improved build performance
+      - name: Install lld linker (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y lld
+      
+      # Set platform-specific environment variables for optimization
+      - name: Set Linux-specific environment
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> $GITHUB_ENV
+          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
+      
+      - name: Set Windows-specific environment
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "CARGO_BUILD_JOBS=4" >> $env:GITHUB_ENV
+          # Use faster linker on Windows if available
+          echo "RUSTFLAGS=-C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
+      
+      - name: Set macOS-specific environment
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
 
       - name: Set up Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "test-${{ matrix.os }}-${{ matrix.rust }}"
+          # Enhanced cache key with Cargo.lock hash for better invalidation
+          key: ${{ runner.os }}-cargo-test-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          # Cache cargo tools to avoid repeated installations
+          cache-directories: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
 
       - name: Run unit tests
-        run: cargo test --lib --bins
+        run: cargo test --lib --bins --jobs 4
         env:
           RUST_LOG: debug
+          # Enable parallel test execution
+          RUST_TEST_THREADS: 4
 
       - name: Run integration tests
-        run: cargo test --test '*'
+        run: cargo test --test '*' --jobs 4
         env:
           RUST_LOG: debug
+          # Enable parallel test execution
+          RUST_TEST_THREADS: 4
 
   # Security audit
   audit:
@@ -95,8 +169,23 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Rust cache for audit
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "audit"
+          key: ${{ runner.os }}-cargo-audit-${{ hashFiles('**/Cargo.lock') }}
+          cache-directories: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: |
+          # Check if cargo-audit is already cached
+          if ! command -v cargo-audit &> /dev/null; then
+            cargo install cargo-audit
+          fi
 
       - name: Run security audit
         run: cargo audit
@@ -122,6 +211,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "build-${{ matrix.os }}"
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          cache-directories: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
 
       - name: Build release binary
         run: cargo build --release --bin runcept
@@ -152,9 +247,19 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "coverage"
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          cache-directories: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
 
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
+        run: |
+          # Check if cargo-llvm-cov is already cached
+          if ! command -v cargo-llvm-cov &> /dev/null; then
+            cargo install cargo-llvm-cov
+          fi
 
       - name: Run coverage
         run: cargo llvm-cov --html --all-targets --workspace
@@ -183,6 +288,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "docs"
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+          cache-directories: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
 
       - name: Check documentation
         run: cargo doc --no-deps --document-private-items --workspace
