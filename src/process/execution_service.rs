@@ -3,7 +3,6 @@ use crate::config::ProcessDefinition;
 use crate::error::{Result, RunceptError};
 use crate::process::configuration::ProcessConfigurationManager;
 use crate::process::{
-    ActivityEvent, ActivityLoggerTrait, ActivityType, DatabaseActivityLogger,
     DefaultHealthCheckService, DefaultProcessRuntime, HealthCheckTrait, LogEntry, Process,
     ProcessLogger, ProcessRepositoryTrait, ProcessRuntimeTrait, ProcessStatus,
     health_check_from_url,
@@ -30,12 +29,11 @@ pub struct ExecutionProcessHandle {
 }
 
 /// Trait-based process execution service that replaces ProcessRuntimeManager
-pub struct ProcessExecutionService<R, RT, H, A>
+pub struct ProcessExecutionService<R, RT, H>
 where
     R: ProcessRepositoryTrait,
     RT: ProcessRuntimeTrait,
     H: HealthCheckTrait,
-    A: ActivityLoggerTrait,
 {
     /// Process handles mapped by environment_id -> process_name -> handle
     pub process_handles: HashMap<String, HashMap<String, ExecutionProcessHandle>>,
@@ -50,15 +48,13 @@ where
     pub process_repository: Arc<R>,
     pub process_runtime: Arc<RT>,
     pub health_check_service: Arc<H>,
-    pub activity_logger: Arc<A>,
 }
 
-impl<R, RT, H, A> ProcessExecutionService<R, RT, H, A>
+impl<R, RT, H> ProcessExecutionService<R, RT, H>
 where
     R: ProcessRepositoryTrait + 'static,
     RT: ProcessRuntimeTrait,
     H: HealthCheckTrait,
-    A: ActivityLoggerTrait + 'static,
 {
     pub fn new(
         process_configuration_manager: Arc<RwLock<ProcessConfigurationManager>>,
@@ -66,7 +62,6 @@ where
         process_repository: Arc<R>,
         process_runtime: Arc<RT>,
         health_check_service: Arc<H>,
-        activity_logger: Arc<A>,
     ) -> Self {
         let (exit_notification_tx, exit_notification_rx) = broadcast::channel(100);
 
@@ -79,7 +74,6 @@ where
             process_repository,
             process_runtime,
             health_check_service,
-            activity_logger,
         };
 
         // Start the exit notification listener task
@@ -93,7 +87,6 @@ where
     fn start_exit_notification_listener(&mut self) {
         let mut rx = self.exit_notification_tx.subscribe();
         let repository = self.process_repository.clone();
-        let activity_logger = self.activity_logger.clone();
         
         tokio::spawn(async move {
             while let Ok(notification) = rx.recv().await {
@@ -143,26 +136,12 @@ where
                     );
                 }
 
-                // Log the process exit activity
-                let activity_type = if notification.exit_status.success() {
-                    crate::process::ActivityType::ProcessStopped
-                } else {
-                    crate::process::ActivityType::ProcessCrashed
-                };
-
-                let _ = activity_logger
-                    .log_activity(crate::process::ActivityEvent {
-                        process_id: Some(format!("{}:{}", notification.environment_id, notification.process_name)),
-                        environment_id: Some(notification.environment_id.clone()),
-                        activity_type,
-                        timestamp: chrono::Utc::now(),
-                        details: serde_json::json!({
-                            "exit_code": notification.exit_status.code(),
-                            "status": new_status,
-                            "reason": "process_exit"
-                        }),
-                    })
-                    .await;
+                // Log the process exit event
+                info!(
+                    "Process '{}:{}' exited with code {:?}, new status: '{}'",
+                    notification.environment_id, notification.process_name,
+                    notification.exit_status.code(), new_status
+                );
 
                 info!(
                     "Updated process '{}:{}' status to '{}' after exit with code {:?}",
@@ -241,19 +220,7 @@ where
         self.log_lifecycle_event(name, environment_id, &format!("Starting process '{name}'"))
             .await;
 
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ProcessStarted,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "requested_by": "user",
-                    "action": "start_requested"
-                }),
-            })
-            .await;
+        // Activity already logged through log_lifecycle_event above
 
         // Get process from database which has the correctly resolved working directory
         let process_record = self
@@ -352,19 +319,7 @@ where
         self.log_lifecycle_event(name, environment_id, &format!("Stopping process '{name}'"))
             .await;
 
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ProcessStopped,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "requested_by": "user",
-                    "action": "stop_requested"
-                }),
-            })
-            .await;
+        // Activity already logged through log_lifecycle_event above
 
         // Check if process exists and is running via repository trait
         let process_status = match self
@@ -751,7 +706,7 @@ where
         let mut processes_to_kill = Vec::new();
         
         // First, find the main process and its process group
-        if let Some(main_process) = system.process(sysinfo::Pid::from_u32(pid as u32)) {
+        if let Some(_main_process) = system.process(sysinfo::Pid::from_u32(pid as u32)) {
             processes_to_kill.push(pid);
             
             // Find all child processes recursively
@@ -770,8 +725,6 @@ where
             "Found {} processes to kill for '{}': {:?}",
             processes_to_kill.len(), process_name, processes_to_kill
         );
-
-        let mut killed_count = 0;
 
         // First pass: Send SIGTERM to all processes (graceful shutdown)
         for &target_pid in &processes_to_kill {
@@ -792,13 +745,9 @@ where
                 // Process is still alive, force kill it
                 if process.kill_with(SysinfoSignal::Kill).unwrap_or(false) {
                     debug!("Sent SIGKILL to process {}", target_pid);
-                    killed_count += 1;
                 } else {
                     warn!("Failed to send SIGKILL to process {}", target_pid);
                 }
-            } else {
-                // Process already exited (graceful shutdown worked)
-                killed_count += 1;
             }
         }
 
@@ -845,70 +794,6 @@ where
     }
 
     /// Kill a process by PID using system calls
-    async fn kill_process_by_pid(&self, pid: u32) -> Result<()> {
-        use sysinfo::{Signal as SysinfoSignal, System};
-
-        if pid == 0 {
-            return Err(RunceptError::ProcessError("Invalid PID: 0".to_string()));
-        }
-
-        let mut system = System::new_all();
-        let sysinfo_pid = sysinfo::Pid::from_u32(pid);
-
-        // Check if the process exists
-        if let Some(process) = system.process(sysinfo_pid) {
-            // First try graceful termination
-            info!("Sending SIGTERM to process {}", pid);
-            if process.kill_with(SysinfoSignal::Term).unwrap_or(false) {
-                info!("Sent SIGTERM to process {}", pid);
-
-                // Wait a bit for graceful shutdown
-                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-
-                // Check if the process is still alive
-                system.refresh_all();
-                if system.process(sysinfo_pid).is_none() {
-                    info!("Process {} exited gracefully after SIGTERM", pid);
-                    return Ok(());
-                }
-
-                // Process is still alive, force kill it
-                warn!("Process {} did not exit gracefully, sending SIGKILL", pid);
-                system.refresh_all();
-                if let Some(process) = system.process(sysinfo_pid) {
-                    if process.kill_with(SysinfoSignal::Kill).unwrap_or(false) {
-                        info!("Sent SIGKILL to process {}", pid);
-
-                        // Give it a moment to be killed
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-                        system.refresh_all();
-                        if system.process(sysinfo_pid).is_none() {
-                            info!("Process {} killed successfully", pid);
-                            return Ok(());
-                        } else {
-                            return Err(RunceptError::ProcessError(format!(
-                                "Failed to kill process {pid}: process still exists after SIGKILL"
-                            )));
-                        }
-                    } else {
-                        return Err(RunceptError::ProcessError(format!(
-                            "Failed to send SIGKILL to process {pid}"
-                        )));
-                    }
-                }
-            } else {
-                return Err(RunceptError::ProcessError(format!(
-                    "Failed to send SIGTERM to process {pid}"
-                )));
-            }
-        }
-
-        // Process doesn't exist
-        Err(RunceptError::ProcessError(format!(
-            "Process {pid} not found"
-        )))
-    }
 
     /// Wait for a process health check to pass during startup
     async fn wait_for_health_check(
@@ -1107,7 +992,6 @@ pub type DefaultProcessExecutionService = ProcessExecutionService<
     crate::database::ProcessRepository,
     DefaultProcessRuntime,
     DefaultHealthCheckService,
-    DatabaseActivityLogger,
 >;
 
 impl DefaultProcessExecutionService {
@@ -1117,10 +1001,9 @@ impl DefaultProcessExecutionService {
         global_config: crate::config::GlobalConfig,
         db_pool: Arc<sqlx::Pool<sqlx::Sqlite>>,
     ) -> Self {
-        let process_repository = Arc::new(crate::database::ProcessRepository::new(db_pool.clone()));
+        let process_repository = Arc::new(crate::database::ProcessRepository::new(db_pool));
         let process_runtime = Arc::new(DefaultProcessRuntime);
         let health_check_service = Arc::new(DefaultHealthCheckService::new());
-        let activity_logger = Arc::new(DatabaseActivityLogger::new(db_pool));
 
         Self::new(
             process_configuration_manager,
@@ -1128,7 +1011,6 @@ impl DefaultProcessExecutionService {
             process_repository,
             process_runtime,
             health_check_service,
-            activity_logger,
         )
     }
 }

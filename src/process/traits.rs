@@ -1,6 +1,6 @@
 use crate::database::process_repository::ProcessRecord;
 use crate::error::Result;
-use crate::process::{Process, ProcessStatus};
+use crate::process::Process;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -130,34 +130,6 @@ pub trait HealthCheckTrait: Send + Sync {
     ) -> Result<Vec<HealthCheckResult>>;
 }
 
-/// Trait for activity logging operations
-///
-/// This trait abstracts activity logging, enabling structured
-/// logging and mock implementations for testing.
-#[async_trait]
-pub trait ActivityLoggerTrait: Send + Sync {
-    /// Log a process activity event
-    async fn log_activity(&self, event: ActivityEvent) -> Result<()>;
-
-    /// Log multiple activity events as a batch
-    async fn log_activities(&self, events: &[ActivityEvent]) -> Result<()>;
-
-    /// Get activity logs for a process
-    async fn get_process_activities(
-        &self,
-        process_id: &str,
-        since: Option<DateTime<Utc>>,
-        limit: Option<u32>,
-    ) -> Result<Vec<ActivityEvent>>;
-
-    /// Get activity logs for an environment
-    async fn get_environment_activities(
-        &self,
-        environment_id: &str,
-        since: Option<DateTime<Utc>>,
-        limit: Option<u32>,
-    ) -> Result<Vec<ActivityEvent>>;
-}
 
 // Supporting types
 
@@ -214,30 +186,3 @@ pub struct HealthCheckResult {
     pub timestamp: DateTime<Utc>,
 }
 
-/// Activity event for logging
-#[derive(Debug, Clone)]
-pub struct ActivityEvent {
-    pub process_id: Option<String>,
-    pub environment_id: Option<String>,
-    pub activity_type: ActivityType,
-    pub timestamp: DateTime<Utc>,
-    pub details: serde_json::Value,
-}
-
-/// Types of activities that can be logged
-#[derive(Debug, Clone)]
-pub enum ActivityType {
-    ProcessStarted,
-    ProcessStopped,
-    ProcessCrashed,
-    ProcessRestarted,
-    StatusChanged {
-        from: ProcessStatus,
-        to: ProcessStatus,
-    },
-    HealthCheckPassed,
-    HealthCheckFailed,
-    ConfigurationChanged,
-    EnvironmentActivated,
-    EnvironmentDeactivated,
-}

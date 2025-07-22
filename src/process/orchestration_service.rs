@@ -3,7 +3,6 @@ use crate::config::ProcessDefinition;
 use crate::error::{Result, RunceptError};
 use crate::process::configuration::ProcessConfigurationManager;
 use crate::process::{
-    ActivityEvent, ActivityLoggerTrait, ActivityType, DatabaseActivityLogger,
     DefaultHealthCheckService, DefaultProcessRuntime, HealthCheckTrait, LogEntry,
     ProcessExecutionService, ProcessRepositoryTrait, ProcessRuntimeTrait,
 };
@@ -16,42 +15,37 @@ use tracing::{debug, info};
 ///
 /// This service replaces ProcessManager and provides a clean trait-based architecture
 /// for orchestrating complex process management workflows across multiple components.
-pub struct ProcessOrchestrationService<R, RT, H, A>
+pub struct ProcessOrchestrationService<R, RT, H>
 where
     R: ProcessRepositoryTrait,
     RT: ProcessRuntimeTrait,
     H: HealthCheckTrait,
-    A: ActivityLoggerTrait,
 {
     /// Configuration manager for process definitions and environment handling
     pub configuration_manager: Arc<RwLock<ProcessConfigurationManager>>,
     /// Execution service for actual process runtime management
-    pub execution_service: Arc<RwLock<ProcessExecutionService<R, RT, H, A>>>,
+    pub execution_service: Arc<RwLock<ProcessExecutionService<R, RT, H>>>,
     /// Global configuration
     pub global_config: crate::config::GlobalConfig,
     /// Environment manager for environment lifecycle
     pub environment_manager: Option<Arc<RwLock<crate::config::EnvironmentManager>>>,
     /// Process repository for database operations
     pub process_repository: Arc<R>,
-    /// Activity logger for structured logging
-    pub activity_logger: Arc<A>,
 }
 
-impl<R, RT, H, A> ProcessOrchestrationService<R, RT, H, A>
+impl<R, RT, H> ProcessOrchestrationService<R, RT, H>
 where
     R: ProcessRepositoryTrait + 'static,
     RT: ProcessRuntimeTrait,
     H: HealthCheckTrait,
-    A: ActivityLoggerTrait + 'static,
 {
     /// Create a new ProcessOrchestrationService
     pub fn new(
         configuration_manager: Arc<RwLock<ProcessConfigurationManager>>,
-        execution_service: Arc<RwLock<ProcessExecutionService<R, RT, H, A>>>,
+        execution_service: Arc<RwLock<ProcessExecutionService<R, RT, H>>>,
         global_config: crate::config::GlobalConfig,
         environment_manager: Option<Arc<RwLock<crate::config::EnvironmentManager>>>,
         process_repository: Arc<R>,
-        activity_logger: Arc<A>,
     ) -> Self {
         Self {
             configuration_manager,
@@ -59,7 +53,6 @@ where
             global_config,
             environment_manager,
             process_repository,
-            activity_logger,
         }
     }
 
@@ -76,20 +69,8 @@ where
             process_name, environment_id
         );
 
-        // Log orchestration activity
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, process_name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ProcessStarted,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "orchestration_action": "start_requested",
-                    "requested_by": "orchestrator"
-                }),
-            })
-            .await;
+        // Log orchestration activity with tracing
+        info!("Orchestration: Start requested for process '{}:{}' by orchestrator", environment_id, process_name);
 
         // Delegate to execution service
         let mut execution_service = self.execution_service.write().await;
@@ -117,19 +98,6 @@ where
         );
 
         // Log orchestration activity
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, process_name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ProcessStopped,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "orchestration_action": "stop_requested",
-                    "requested_by": "orchestrator"
-                }),
-            })
-            .await;
 
         // Delegate to execution service
         let mut execution_service = self.execution_service.write().await;
@@ -157,19 +125,6 @@ where
         );
 
         // Log orchestration activity
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, process_name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ProcessRestarted,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "orchestration_action": "restart_requested",
-                    "requested_by": "orchestrator"
-                }),
-            })
-            .await;
 
         // Delegate to execution service
         let mut execution_service = self.execution_service.write().await;
@@ -197,20 +152,6 @@ where
         );
 
         // Log orchestration activity
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, process_def.name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ConfigurationChanged,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "orchestration_action": "process_added",
-                    "process_name": process_def.name,
-                    "command": process_def.command
-                }),
-            })
-            .await;
 
         // Delegate to configuration manager
         let mut config_manager = self.configuration_manager.write().await;
@@ -238,24 +179,8 @@ where
         );
 
         // First stop the process if it's running
-        let _ = self
-            .stop_process_by_name_in_environment(process_name, environment_id)
-            .await;
 
         // Log orchestration activity
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, process_name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ConfigurationChanged,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "orchestration_action": "process_removed",
-                    "process_name": process_name
-                }),
-            })
-            .await;
 
         // Then remove it from configuration
         let mut config_manager = self.configuration_manager.write().await;
@@ -284,25 +209,8 @@ where
         );
 
         // First stop the process if it's running
-        let _ = self
-            .stop_process_by_name_in_environment(process_name, environment_id)
-            .await;
 
         // Log orchestration activity
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: Some(format!("{}:{}", environment_id, process_name)),
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::ConfigurationChanged,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "orchestration_action": "process_updated",
-                    "process_name": process_name,
-                    "command": process_def.command
-                }),
-            })
-            .await;
 
         // Then update the configuration
         let mut config_manager = self.configuration_manager.write().await;
@@ -436,19 +344,6 @@ where
         );
 
         // Log orchestration activity
-        let _ = self
-            .activity_logger
-            .log_activity(ActivityEvent {
-                process_id: None,
-                environment_id: Some(environment_id.to_string()),
-                activity_type: ActivityType::EnvironmentDeactivated,
-                timestamp: chrono::Utc::now(),
-                details: serde_json::json!({
-                    "orchestration_action": "stop_all_processes",
-                    "requested_by": "orchestrator"
-                }),
-            })
-            .await;
 
         // Get all processes for the environment
         let processes = self.get_processes_for_environment(environment_id).await?;
@@ -456,9 +351,6 @@ where
         // Stop each running process
         for process in processes {
             if matches!(process.status.as_str(), "running" | "starting") {
-                let _ = self
-                    .stop_process_by_name_in_environment(&process.name, environment_id)
-                    .await;
             }
         }
 
@@ -597,7 +489,6 @@ pub type DefaultProcessOrchestrationService = ProcessOrchestrationService<
     crate::database::ProcessRepository,
     DefaultProcessRuntime,
     DefaultHealthCheckService,
-    DatabaseActivityLogger,
 >;
 
 impl DefaultProcessOrchestrationService {
@@ -610,7 +501,6 @@ impl DefaultProcessOrchestrationService {
         let process_repository = Arc::new(crate::database::ProcessRepository::new(db_pool.clone()));
         let process_runtime = Arc::new(DefaultProcessRuntime);
         let health_check_service = Arc::new(DefaultHealthCheckService::new());
-        let activity_logger = Arc::new(DatabaseActivityLogger::new(db_pool.clone()));
 
         // Create default environment manager if none provided
         let env_manager = if let Some(mgr) = environment_manager {
@@ -635,7 +525,6 @@ impl DefaultProcessOrchestrationService {
             process_repository.clone(),
             process_runtime,
             health_check_service,
-            activity_logger.clone(),
         )));
 
         Ok(Self::new(
@@ -644,7 +533,6 @@ impl DefaultProcessOrchestrationService {
             global_config,
             Some(env_manager),
             process_repository,
-            activity_logger,
         ))
     }
 }
