@@ -134,7 +134,8 @@ pub fn init_cli_logging(config: &GlobalConfig) -> Result<()> {
     // Enable file logging for CLI with separate log file
     cli_config.logging.file_enabled = true;
 
-    init_component_logging(&cli_config, "cli", true)?;
+    // CLI should only log to file, never to stdout/stderr to keep command output clean
+    init_component_logging(&cli_config, "cli", false)?;
     debug!("CLI logging initialized");
     Ok(())
 }
