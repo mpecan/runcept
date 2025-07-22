@@ -31,29 +31,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       
-      # Install faster linker on Linux for improved build performance
-      - name: Install lld linker (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y lld
-      
-      # Set platform-specific environment variables for optimization
-      - name: Set Linux-specific environment
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> $GITHUB_ENV
-          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
-      
-      - name: Set Windows-specific environment
-        if: matrix.os == 'windows-latest'
-        run: |
-          echo "CARGO_BUILD_JOBS=4" >> $env:GITHUB_ENV
-          echo "RUSTFLAGS=-C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
-      
-      - name: Set macOS-specific environment
-        if: matrix.os == 'macos-latest'
-        run: |
-          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
+
+
 
       - name: Set up Rust cache
         uses: Swatinem/rust-cache@v2
@@ -115,20 +97,20 @@ jobs:
       - name: Set Linux-specific environment
         if: matrix.os == 'ubuntu-latest'
         run: |
-          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> $GITHUB_ENV
-          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
       
       - name: Set Windows-specific environment
         if: matrix.os == 'windows-latest'
         run: |
-          echo "CARGO_BUILD_JOBS=4" >> $env:GITHUB_ENV
+          echo "CARGO_BUILD_JOBS=4" >> "$env:GITHUB_ENV"
           # Use faster linker on Windows if available
-          echo "RUSTFLAGS=-C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
+          echo "RUSTFLAGS=-C link-arg=/INCREMENTAL:NO" >> "$env:GITHUB_ENV"
       
       - name: Set macOS-specific environment
         if: matrix.os == 'macos-latest'
         run: |
-          echo "CARGO_BUILD_JOBS=4" >> $GITHUB_ENV
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
       - name: Set up Rust cache
         uses: Swatinem/rust-cache@v2
