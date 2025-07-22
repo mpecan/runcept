@@ -25,7 +25,7 @@ name = "process-group-env"
 
 [processes.parent-with-children]
 name = "parent-with-children"
-command = "bash -c 'echo Parent PID: $$; sleep 2 & echo Child1 PID: $!; sleep 4 & echo Child2 PID: $!; wait'"
+command = "bash -c 'echo Parent PID: $$; sleep 2 && echo Child1 PID: $!; sleep 4 && echo Child2 PID: $!; wait'"
 auto_restart = false
 "#;
 
@@ -105,7 +105,7 @@ auto_restart = false
         // Verify at least some child processes are running
         let alive_children: Vec<_> = child_pids
             .iter()
-            .filter(|&&pid| is_process_alive(pid))
+            .filter(|&pid| is_process_alive(*pid))
             .collect();
 
         assert!(
@@ -164,7 +164,7 @@ name = "nested-process-env"
 
 [processes.nested-parent]
 name = "nested-parent"
-command = "bash -c 'bash -c \"sleep 10 & sleep 15 & wait\" & bash -c \"sleep 20\" & wait'"
+command = "bash -c 'bash -c \"sleep 10 && sleep 15 && wait\" && bash -c \"sleep 20\" && wait'"
 auto_restart = false
 "#;
 

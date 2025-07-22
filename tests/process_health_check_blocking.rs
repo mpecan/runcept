@@ -22,7 +22,7 @@ async fn test_health_check_blocks_start_command_until_timeout() {
 
     // Create config with a health check that will fail (unreachable URL)
     test_env
-        .create_config_file(failing_health_check_config())
+        .create_config_file(&failing_health_check_config())
         .await
         .unwrap();
 
@@ -74,7 +74,7 @@ async fn test_successful_health_check_allows_start_to_complete() {
     .await;
 
     // Use a command health check that will succeed
-    let config_content = command_health_check_config();
+    let config_content = &command_health_check_config();
     test_env.create_config_file(config_content).await.unwrap();
 
     // Activate the environment
@@ -118,7 +118,7 @@ async fn test_process_without_health_check_starts_immediately() {
 
     // Use basic config without health check
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -271,7 +271,7 @@ async fn test_lifecycle_events_logged_during_health_check_blocking() {
 
     // Create config with failing health check
     test_env
-        .create_config_file(failing_health_check_config())
+        .create_config_file(&failing_health_check_config())
         .await
         .unwrap();
 
