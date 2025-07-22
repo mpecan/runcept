@@ -1,33 +1,35 @@
 use crate::config::GlobalConfig;
 use crate::error::Result;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, mpsc};
-use tokio::time::{Instant, interval, sleep};
+use tokio::time::{interval, sleep};
 
 #[derive(Debug, Clone)]
 pub struct ActivityInfo {
-    pub last_activity_time: Instant,
+    pub last_activity_time: DateTime<Utc>,
     pub activity_count: u64,
 }
 
 impl ActivityInfo {
     pub fn new() -> Self {
         Self {
-            last_activity_time: Instant::now(),
+            last_activity_time: Utc::now(),
             activity_count: 1,
         }
     }
 
     pub fn update(&mut self) {
-        self.last_activity_time = Instant::now();
+        self.last_activity_time = Utc::now();
         self.activity_count += 1;
     }
 
     pub fn is_inactive(&self, timeout: Duration) -> bool {
-        self.last_activity_time.elapsed() > timeout
+        let timeout_chrono = ChronoDuration::from_std(timeout).unwrap_or(ChronoDuration::zero());
+        Utc::now() - self.last_activity_time > timeout_chrono
     }
 }
 
@@ -106,9 +108,8 @@ impl ActivityTracker {
     }
 
     pub async fn cleanup_old_activities(&self, max_age: Duration) -> usize {
-        let cutoff_time = Instant::now()
-            .checked_sub(max_age)
-            .unwrap_or(Instant::now()); // If we can't subtract, use now (nothing will be cleaned)
+        let max_age_chrono = ChronoDuration::from_std(max_age).unwrap_or(ChronoDuration::zero());
+        let cutoff_time = Utc::now() - max_age_chrono;
         let mut cleaned_count = 0;
 
         // Clean up old process activities
@@ -185,7 +186,8 @@ impl InactivityScheduler {
                         }
 
                         // Cleanup old activities
-                        let cutoff_time = Instant::now() - max_activity_age;
+                        let max_age_chrono = ChronoDuration::from_std(max_activity_age).unwrap_or(ChronoDuration::zero());
+                        let cutoff_time = Utc::now() - max_age_chrono;
                         let mut cleaned_count = 0;
 
                         // Clean process activities
@@ -397,9 +399,9 @@ mod tests {
     use super::*;
     use crate::config::GlobalConfig;
     use crate::process::Process;
+    use chrono::{Duration as ChronoDuration, Utc};
     use std::time::Duration;
     use tempfile::TempDir;
-    use tokio::time::Instant;
 
     #[tokio::test]
     async fn test_activity_tracker_creation() {
@@ -418,7 +420,8 @@ mod tests {
         let activities = tracker.process_activities.read().await;
         assert!(activities.contains_key(&process_id));
         let activity = activities.get(&process_id).unwrap();
-        assert!(activity.last_activity_time.elapsed().as_secs() < 1);
+        let elapsed = Utc::now() - activity.last_activity_time;
+        assert!(elapsed.num_seconds() < 1);
     }
 
     #[tokio::test]
@@ -453,10 +456,11 @@ mod tests {
         // Manually insert old activity
         {
             let mut activities = tracker.process_activities.write().await;
+            let old_time = Utc::now() - ChronoDuration::seconds(20);
             activities.insert(
                 process_id.clone(),
                 ActivityInfo {
-                    last_activity_time: Instant::now() - Duration::from_secs(20),
+                    last_activity_time: old_time,
                     activity_count: 1,
                 },
             );
@@ -477,10 +481,11 @@ mod tests {
 
         {
             let mut activities = tracker.process_activities.write().await;
+            let old_time = Utc::now() - ChronoDuration::seconds(20);
             activities.insert(
                 "inactive-process".to_string(),
                 ActivityInfo {
-                    last_activity_time: Instant::now() - Duration::from_secs(20),
+                    last_activity_time: old_time,
                     activity_count: 1,
                 },
             );
@@ -497,34 +502,21 @@ mod tests {
     async fn test_cleanup_old_activities() {
         let tracker = ActivityTracker::new();
 
-        // Create an old activity using a safe approach
-        let old_instant = {
-            let now = Instant::now();
-            // Try to subtract 2 hours, but if that would underflow (system boot < 2 hours ago),
-            // use a duration that's guaranteed to be older than our cutoff of 1 hour
-            now.checked_sub(Duration::from_secs(7200))
-                .unwrap_or_else(|| {
-                    // Fallback: create an instant that's definitely old enough for the test
-                    // by using the maximum duration we can safely subtract
-                    let safe_duration = Duration::from_secs(3700); // Just over 1 hour cutoff
-                    now.checked_sub(safe_duration).unwrap_or(now) // If even this fails, use now (test will still work)
-                })
-        };
+        // Create an old activity - much simpler with DateTime<Utc>
+        let old_time = Utc::now() - ChronoDuration::hours(2); // 2 hours ago
 
         {
             let mut activities = tracker.process_activities.write().await;
             activities.insert(
                 "old-process".to_string(),
                 ActivityInfo {
-                    last_activity_time: old_instant,
+                    last_activity_time: old_time,
                     activity_count: 1,
                 },
             );
         }
 
-        sleep(Duration::from_secs(1)).await; // Ensure the time has advanced
-
-        // Add recent and old activities
+        // Add recent activity
         tracker.record_process_activity("recent-process").await;
 
         let cleaned = tracker
