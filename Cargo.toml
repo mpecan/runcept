@@ -16,7 +16,8 @@ exclude = [
     "test-project/",
     ".serena/",
     "rmcp-code/",
-    "*.md",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
     ".github/",
     "migrations/"
 ]
