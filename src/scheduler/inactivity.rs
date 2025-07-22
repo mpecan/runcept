@@ -106,7 +106,9 @@ impl ActivityTracker {
     }
 
     pub async fn cleanup_old_activities(&self, max_age: Duration) -> usize {
-        let cutoff_time = Instant::now() - max_age;
+        let cutoff_time = Instant::now()
+            .checked_sub(max_age)
+            .unwrap_or(Instant::now()); // If we can't subtract, use now (nothing will be cleaned)
         let mut cleaned_count = 0;
 
         // Clean up old process activities
@@ -498,12 +500,26 @@ mod tests {
         // Add recent and old activities
         tracker.record_process_activity("recent-process").await;
 
+        // Create an old activity using a safe approach
+        let old_instant = {
+            let now = Instant::now();
+            // Try to subtract 2 hours, but if that would underflow (system boot < 2 hours ago),
+            // use a duration that's guaranteed to be older than our cutoff of 1 hour
+            now.checked_sub(Duration::from_secs(7200))
+                .unwrap_or_else(|| {
+                    // Fallback: create an instant that's definitely old enough for the test
+                    // by using the maximum duration we can safely subtract
+                    let safe_duration = Duration::from_secs(3700); // Just over 1 hour cutoff
+                    now.checked_sub(safe_duration).unwrap_or(now) // If even this fails, use now (test will still work)
+                })
+        };
+
         {
             let mut activities = tracker.process_activities.write().await;
             activities.insert(
                 "old-process".to_string(),
                 ActivityInfo {
-                    last_activity_time: Instant::now() - Duration::from_secs(7200), // 2 hours old
+                    last_activity_time: old_instant,
                     activity_count: 1,
                 },
             );
