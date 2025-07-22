@@ -16,7 +16,7 @@ pub trait IpcStream: AsyncRead + AsyncWrite + Send + Unpin {
 /// Cross-platform IPC listener trait
 pub trait IpcListener: Send {
     type Stream: IpcStream;
-    
+
     /// Accept a new connection
     #[allow(async_fn_in_trait)]
     async fn accept(&mut self) -> Result<Self::Stream>;
@@ -27,10 +27,11 @@ pub trait IpcListener: Send {
 /// Cross-platform IPC client trait
 pub trait IpcClient: Send {
     type Stream: IpcStream;
-    
+
     /// Connect to the IPC endpoint
     #[allow(async_fn_in_trait)]
-    async fn connect(path: &IpcPath) -> Result<Self::Stream>;}
+    async fn connect(path: &IpcPath) -> Result<Self::Stream>;
+}
 
 /// Cross-platform IPC path abstraction
 #[derive(Debug, Clone, PartialEq, Eq)]
