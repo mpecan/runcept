@@ -74,7 +74,7 @@ pub fn ensure_binaries_built() {
         } else {
             ""
         };
-        println!("Binaries built and cached successfully{}", coverage_info);
+        println!("Binaries built and cached successfully{coverage_info}");
     });
 }
 
@@ -140,7 +140,7 @@ pub fn get_binary_path_checked(name: &str) -> Result<PathBuf, String> {
                 ))
             }
         }
-        None => Err(format!("Binary '{}' not found in built binaries", name)),
+        None => Err(format!("Binary '{name}' not found in built binaries")),
     }
 }
 

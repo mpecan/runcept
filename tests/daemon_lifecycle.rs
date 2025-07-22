@@ -68,7 +68,7 @@ async fn test_daemon_handles_multiple_start_attempts() {
     .await;
 
     // Start daemon
-    test_env.start_daemon().await;
+    let _ = test_env.start_daemon().await;
     assert!(test_env.is_daemon_running(), "Daemon should be running");
 
     // Try to start daemon again - should handle gracefully
@@ -237,7 +237,7 @@ async fn test_daemon_graceful_shutdown() {
     assert!(test_env.is_daemon_running(), "Daemon should be running");
 
     // Record the daemon PID
-    let daemon_pid = test_env.daemon_pid().expect("Should have daemon PID");
+    let _daemon_pid = test_env.daemon_pid().expect("Should have daemon PID");
 
     // Send graceful shutdown command using new method
     let output = test_env.daemon_stop();

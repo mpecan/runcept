@@ -49,8 +49,7 @@ async fn test_health_check_blocks_start_command_until_timeout() {
     // The command should have taken close to 15 seconds (health check timeout)
     assert!(
         elapsed >= Duration::from_secs(10), // Allow some variance
-        "Start command should have blocked for health check timeout, but only took {:?}",
-        elapsed
+        "Start command should have blocked for health check timeout, but only took {elapsed:?}"
     );
 
     // The command should fail due to health check timeout
@@ -95,8 +94,7 @@ async fn test_successful_health_check_allows_start_to_complete() {
     // Should complete much faster than the timeout since health check succeeds
     assert!(
         elapsed < Duration::from_secs(5),
-        "Start command should complete quickly when health check succeeds, but took {:?}",
-        elapsed
+        "Start command should complete quickly when health check succeeds, but took {elapsed:?}"
     );
 
     // Process should be running
@@ -141,8 +139,7 @@ async fn test_process_without_health_check_starts_immediately() {
     // Should complete almost immediately
     assert!(
         elapsed < Duration::from_secs(2),
-        "Start command should complete immediately when no health check, but took {:?}",
-        elapsed
+        "Start command should complete immediately when no health check, but took {elapsed:?}"
     );
 }
 
@@ -194,8 +191,7 @@ auto_restart = false
     // Allow more flexibility in timing due to system load and test environment
     assert!(
         elapsed >= Duration::from_secs(3) && elapsed <= Duration::from_secs(12),
-        "Start command should timeout after ~5 seconds with custom timeout, but took {:?}",
-        elapsed
+        "Start command should timeout after ~5 seconds with custom timeout, but took {elapsed:?}"
     );
 
     // Should fail due to timeout
@@ -249,7 +245,7 @@ auto_restart = false
     // Note: The exact output format depends on the logging implementation
     let stderr = String::from_utf8_lossy(&start_output.stderr);
     let stdout = String::from_utf8_lossy(&start_output.stdout);
-    let combined_output = format!("{}{}", stdout, stderr);
+    let combined_output = format!("{stdout}{stderr}");
 
     // Look for indicators of multiple attempts or timeout message
     // The command should fail (non-zero exit) even if the error message format varies
@@ -306,8 +302,7 @@ async fn test_lifecycle_events_logged_during_health_check_blocking() {
         // Should contain lifecycle events like "Starting process"
         assert!(
             logs_stdout.contains("Starting") || logs_stdout.contains("Waiting for health check"),
-            "Logs should contain lifecycle events during health check blocking. Actual logs: {}",
-            logs_stdout
+            "Logs should contain lifecycle events during health check blocking. Actual logs: {logs_stdout}"
         );
     }
 }

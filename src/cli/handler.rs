@@ -1,57 +1,4 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cli::commands::{CliArgs, Commands, DaemonAction};
-    use tempfile::TempDir;
 
-    #[tokio::test]
-    async fn test_cli_handler_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let socket_path = temp_dir.path().join("test.sock");
-
-        let handler = CliHandler::new(Some(socket_path.clone()));
-        assert_eq!(handler.client.socket_path, socket_path);
-    }
-
-    #[tokio::test]
-    async fn test_extract_daemon_request_from_commands() {
-        // Test environment commands
-        let args = CliArgs {
-            verbose: false,
-            socket: None,
-            command: Commands::Activate {
-                path: Some("/test".to_string()),
-            },
-        };
-
-        let request = CliHandler::command_to_request(&args.command).await.unwrap();
-        match request {
-            Some(DaemonRequest::ActivateEnvironment { path }) => {
-                assert_eq!(path, Some("/test".to_string()));
-            }
-            _ => panic!("Expected ActivateEnvironment request"),
-        }
-
-        // Test process commands - these now require environment resolution
-        // Skip this test for now since it requires a valid .runcept.toml file
-        // TODO: Create a proper test with temp directory and .runcept.toml file
-    }
-
-    #[tokio::test]
-    async fn test_daemon_commands_not_converted() {
-        let args = CliArgs {
-            verbose: false,
-            socket: None,
-            command: Commands::Daemon {
-                action: DaemonAction::Start { foreground: false },
-            },
-        };
-
-        // Daemon commands should not be converted to requests
-        let result = CliHandler::command_to_request(&args.command).await.unwrap();
-        assert!(result.is_none());
-    }
-}
 
 use crate::cli::client::DaemonClient;
 use crate::cli::commands::{CliArgs, CliResult, Commands, DaemonAction, DaemonRequest};
@@ -458,4 +405,59 @@ impl CliHandler {
 /// Create a CLI handler from command line arguments
 pub fn create_handler_from_args(args: &CliArgs) -> CliHandler {
     CliHandler::new(args.socket.clone()).with_verbose(args.verbose)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::commands::{CliArgs, Commands, DaemonAction};
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_cli_handler_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+
+        let handler = CliHandler::new(Some(socket_path.clone()));
+        assert_eq!(handler.client.socket_path, socket_path);
+    }
+
+    #[tokio::test]
+    async fn test_extract_daemon_request_from_commands() {
+        // Test environment commands
+        let args = CliArgs {
+            verbose: false,
+            socket: None,
+            command: Commands::Activate {
+                path: Some("/test".to_string()),
+            },
+        };
+
+        let request = CliHandler::command_to_request(&args.command).await.unwrap();
+        match request {
+            Some(DaemonRequest::ActivateEnvironment { path }) => {
+                assert_eq!(path, Some("/test".to_string()));
+            }
+            _ => panic!("Expected ActivateEnvironment request"),
+        }
+
+        // Test process commands - these now require environment resolution
+        // Skip this test for now since it requires a valid .runcept.toml file
+        // TODO: Create a proper test with temp directory and .runcept.toml file
+    }
+
+    #[tokio::test]
+    async fn test_daemon_commands_not_converted() {
+        let args = CliArgs {
+            verbose: false,
+            socket: None,
+            command: Commands::Daemon {
+                action: DaemonAction::Start { foreground: false },
+            },
+        };
+
+        // Daemon commands should not be converted to requests
+        let result = CliHandler::command_to_request(&args.command).await.unwrap();
+        assert!(result.is_none());
+    }
 }

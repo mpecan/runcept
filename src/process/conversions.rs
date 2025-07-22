@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(process.environment_id, "env1");
         assert_eq!(process.id, "env1:test-process");
         assert_eq!(process.status, ProcessStatus::Stopped);
-        assert_eq!(process.auto_restart, true);
+        assert!(process.auto_restart);
         assert_eq!(process.health_check_url, definition.health_check_url);
         assert_eq!(process.depends_on, definition.depends_on);
         assert_eq!(process.env_vars, definition.env_vars);

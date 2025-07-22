@@ -284,8 +284,7 @@ async fn test_init_with_relative_paths() {
             let config_path = full_path.join(".runcept.toml");
             assert!(
                 config_path.exists(),
-                "Init should work with relative path: {}",
-                rel_path
+                "Init should work with relative path: {rel_path}"
             );
         }
         // Some relative paths might fail depending on working directory, which is okay

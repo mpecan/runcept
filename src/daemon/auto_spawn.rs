@@ -212,7 +212,7 @@ mod tests {
             RunceptError::ConnectionError(_) | RunceptError::ProcessError(_) => {
                 // Expected error types
             }
-            other => panic!("Unexpected error type: {:?}", other),
+            other => panic!("Unexpected error type: {other:?}"),
         }
     }
 
@@ -233,7 +233,7 @@ mod tests {
             RunceptError::ConnectionError(_) | RunceptError::ProcessError(_) => {
                 // Expected error types
             }
-            other => panic!("Unexpected error type: {:?}", other),
+            other => panic!("Unexpected error type: {other:?}"),
         }
     }
 

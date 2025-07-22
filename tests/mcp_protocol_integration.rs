@@ -13,7 +13,6 @@ use tokio::time::sleep;
 ///
 /// These tests validate the same functionality as the old mcp_integration_test.rs but using
 /// the new centralized test environment.
-
 #[cfg(test)]
 mod mcp_protocol_tests {
     use super::*;
@@ -84,9 +83,7 @@ mod mcp_protocol_tests {
             self.test_env.project_dir()
         }
 
-        async fn create_config_file(&self, content: &str) -> Result<PathBuf, std::io::Error> {
-            self.test_env.create_config_file(content).await
-        }
+
 
         fn init_project(&self) -> Result<(), Box<dyn std::error::Error>> {
             let output = self
@@ -539,7 +536,7 @@ mod mcp_protocol_tests {
         let test_file_path = test_env.project_dir().join("test_marker.txt");
         std::fs::write(&test_file_path, "working_directory_test").unwrap();
 
-        println!("Test file written: {:?}", test_file_path);
+        println!("Test file written: {test_file_path:?}");
         println!("Test path: {:?}", test_file_path.display());
         assert!(
             test_file_path.exists(),
@@ -606,11 +603,7 @@ mod mcp_protocol_tests {
             .content
             .iter()
             .filter_map(|c| {
-                if let Some(text) = c.clone().raw.as_text() {
-                    Some(text.text.clone())
-                } else {
-                    None
-                }
+                c.clone().raw.as_text().map(|text| text.text.clone())
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -655,11 +648,7 @@ mod mcp_protocol_tests {
             .content
             .iter()
             .filter_map(|c| {
-                if let Some(text) = c.clone().raw.as_text() {
-                    Some(text.text.clone())
-                } else {
-                    None
-                }
+                c.clone().raw.as_text().map(|text| text.text.clone())
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -668,14 +657,14 @@ mod mcp_protocol_tests {
         if !log_content.contains("test_marker.txt") {
             println!("\n=== DAEMON LOGS ===");
             if let Ok(daemon_logs) = test_env.test_env.get_daemon_logs() {
-                println!("{}", daemon_logs);
+                println!("{daemon_logs}");
             } else {
                 println!("Failed to get daemon logs");
             }
 
             println!("\n=== MCP SERVER LOGS ===");
             if let Ok(mcp_logs) = test_env.test_env.get_mcp_server_logs() {
-                println!("{}", mcp_logs);
+                println!("{mcp_logs}");
             } else {
                 println!("Failed to get MCP server logs");
             }
@@ -745,11 +734,7 @@ mod mcp_protocol_tests {
             .content
             .iter()
             .filter_map(|c| {
-                if let Some(text) = c.clone().raw.as_text() {
-                    Some(text.text.clone())
-                } else {
-                    None
-                }
+                c.clone().raw.as_text().map(|text| text.text.clone())
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -887,11 +872,7 @@ mod mcp_protocol_tests {
             .content
             .iter()
             .filter_map(|c| {
-                if let Some(text) = c.clone().raw.as_text() {
-                    Some(text.text.clone())
-                } else {
-                    None
-                }
+                c.clone().raw.as_text().map(|text| text.text.clone())
             })
             .collect::<Vec<_>>()
             .join("\n");

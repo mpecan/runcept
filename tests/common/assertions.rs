@@ -6,19 +6,15 @@ use std::process::Output;
 use std::time::Duration;
 
 /// Custom assertion helpers for runcept integration tests
-
 /// Assert that a command output contains text (case-insensitive)
 pub fn assert_output_contains(output: &Output, expected: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{}{}", stdout, stderr);
+    let combined = format!("{stdout}{stderr}");
 
     assert!(
         combined.to_lowercase().contains(&expected.to_lowercase()),
-        "Expected output to contain '{}'\nActual stdout: {}\nActual stderr: {}",
-        expected,
-        stdout,
-        stderr
+        "Expected output to contain '{expected}'\nActual stdout: {stdout}\nActual stderr: {stderr}"
     );
 }
 
@@ -65,8 +61,7 @@ pub fn assert_daemon_running(mut cmd: Command) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("Running"),
-        "Expected daemon to be running, got: {}",
-        stdout
+        "Expected daemon to be running, got: {stdout}"
     );
 }
 
@@ -82,8 +77,7 @@ pub fn assert_daemon_not_running(mut cmd: Command) {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
             stdout.contains("Not running") || stdout.contains("Stopped"),
-            "Expected daemon to not be running, got: {}",
-            stdout
+            "Expected daemon to not be running, got: {stdout}"
         );
     }
     // If status command fails, that's also acceptable (daemon not running)
@@ -105,10 +99,7 @@ pub fn assert_process_status(mut cmd: Command, process_name: &str, expected_stat
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains(process_name) && stdout.contains(expected_status),
-        "Expected process '{}' to have status '{}'\nActual output: {}",
-        process_name,
-        expected_status,
-        stdout
+        "Expected process '{process_name}' to have status '{expected_status}'\nActual output: {stdout}"
     );
 }
 
@@ -135,8 +126,7 @@ pub fn assert_lifecycle_events_logged(mut cmd: Command, process_name: &str) {
 
     assert!(
         has_lifecycle,
-        "Expected to find lifecycle events in logs for process '{}'\nActual output: {}",
-        process_name, stdout
+        "Expected to find lifecycle events in logs for process '{process_name}'\nActual output: {stdout}"
     );
 }
 
@@ -149,14 +139,12 @@ pub fn assert_health_check_timeout(mut cmd: Command, process_name: &str, timeout
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let expected_message = format!(
-        "Health check timeout for process '{}' after {} seconds",
-        process_name, timeout_seconds
+        "Health check timeout for process '{process_name}' after {timeout_seconds} seconds"
     );
 
     assert!(
         stderr.contains(&expected_message) || stderr.contains("timeout"),
-        "Expected health check timeout message, got: {}",
-        stderr
+        "Expected health check timeout message, got: {stderr}"
     );
 }
 

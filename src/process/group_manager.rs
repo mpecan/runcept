@@ -146,14 +146,12 @@ mod tests {
     async fn test_group_manager_creation() {
         let _manager = ProcessGroupManager::new();
         // Just ensure it can be created without panic
-        assert!(true);
     }
 
     #[tokio::test]
     async fn test_default_creation() {
-        let _manager = ProcessGroupManager::default();
+        let _manager = ProcessGroupManager;
         // Just ensure it can be created without panic
-        assert!(true);
     }
 
     #[tokio::test]

@@ -270,8 +270,7 @@ async fn test_status_command_without_active_environment() {
     let status_stdout = String::from_utf8_lossy(&status_output.stdout);
     assert!(
         status_stdout.contains("No active environment"),
-        "Status should indicate no active environment. Actual output: {}",
-        status_stdout
+        "Status should indicate no active environment. Actual output: {status_stdout}"
     );
 }
 
@@ -345,8 +344,7 @@ auto_restart = false
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     assert!(
         list_stdout.contains("env2-process"),
-        "Should show processes from second environment, actual output: {}",
-        list_stdout
+        "Should show processes from second environment, actual output: {list_stdout}"
     );
 }
 

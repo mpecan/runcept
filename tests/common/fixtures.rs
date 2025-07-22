@@ -2,7 +2,6 @@
 #![allow(unused_imports)]
 
 /// Common test configuration fixtures and templates
-
 /// Basic test environment configuration
 pub fn basic_test_config() -> &'static str {
     r#"
@@ -44,8 +43,7 @@ command = "python3 -m http.server {port}"
 health_check_url = "http://localhost:{port}/"
 health_check_interval = 2
 auto_restart = false
-"#,
-        port = port
+"#
     )
 }
 
@@ -172,8 +170,7 @@ command = "nc -l {port}"
 health_check_url = "tcp://localhost:{port}"
 health_check_interval = 1
 auto_restart = false
-"#,
-        port = port
+"#
     )
 }
 

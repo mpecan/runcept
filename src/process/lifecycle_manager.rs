@@ -777,6 +777,5 @@ mod tests {
         lifecycle_manager.remove_process_from_tracking("test-process", "test-env");
 
         // Should not panic
-        assert!(true);
     }
 }

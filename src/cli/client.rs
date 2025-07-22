@@ -1,56 +1,4 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
 
-    #[tokio::test]
-    async fn test_daemon_client_creation() {
-        let temp_dir = TempDir::new().unwrap();
-        let socket_path = temp_dir.path().join("test.sock");
-
-        let client = DaemonClient::new(socket_path.clone());
-        assert_eq!(client.socket_path, socket_path);
-    }
-
-    #[test]
-    fn test_get_default_socket_path() {
-        let path = get_default_socket_path();
-        assert!(path.to_string_lossy().contains(".runcept"));
-        assert!(path.to_string_lossy().ends_with("daemon.sock"));
-    }
-
-    #[test]
-    fn test_request_serialization() {
-        let request = DaemonRequest::StartProcess {
-            name: "test".to_string(),
-            environment: None,
-        };
-        let serialized = serde_json::to_string(&request).unwrap();
-        let deserialized: DaemonRequest = serde_json::from_str(&serialized).unwrap();
-
-        match deserialized {
-            DaemonRequest::StartProcess { name, environment } => {
-                assert_eq!(name, "test");
-                assert_eq!(environment, None);
-            }
-            _ => panic!("Unexpected request type"),
-        }
-    }
-
-    #[test]
-    fn test_response_serialization() {
-        let response = DaemonResponse::Success {
-            message: "OK".to_string(),
-        };
-        let serialized = serde_json::to_string(&response).unwrap();
-        let deserialized: DaemonResponse = serde_json::from_str(&serialized).unwrap();
-
-        match deserialized {
-            DaemonResponse::Success { message } => assert_eq!(message, "OK"),
-            _ => panic!("Unexpected response type"),
-        }
-    }
-}
 
 use crate::cli::commands::{DaemonRequest, DaemonResponse};
 use crate::error::{Result, RunceptError};
@@ -352,4 +300,58 @@ pub async fn check_daemon_connection(socket_path: Option<PathBuf>) -> Result<()>
     // Test with a simple status request
     client.get_daemon_status().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_daemon_client_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+
+        let client = DaemonClient::new(socket_path.clone());
+        assert_eq!(client.socket_path, socket_path);
+    }
+
+    #[test]
+    fn test_get_default_socket_path() {
+        let path = get_default_socket_path();
+        assert!(path.to_string_lossy().contains(".runcept"));
+        assert!(path.to_string_lossy().ends_with("daemon.sock"));
+    }
+
+    #[test]
+    fn test_request_serialization() {
+        let request = DaemonRequest::StartProcess {
+            name: "test".to_string(),
+            environment: None,
+        };
+        let serialized = serde_json::to_string(&request).unwrap();
+        let deserialized: DaemonRequest = serde_json::from_str(&serialized).unwrap();
+
+        match deserialized {
+            DaemonRequest::StartProcess { name, environment } => {
+                assert_eq!(name, "test");
+                assert_eq!(environment, None);
+            }
+            _ => panic!("Unexpected request type"),
+        }
+    }
+
+    #[test]
+    fn test_response_serialization() {
+        let response = DaemonResponse::Success {
+            message: "OK".to_string(),
+        };
+        let serialized = serde_json::to_string(&response).unwrap();
+        let deserialized: DaemonResponse = serde_json::from_str(&serialized).unwrap();
+
+        match deserialized {
+            DaemonResponse::Success { message } => assert_eq!(message, "OK"),
+            _ => panic!("Unexpected response type"),
+        }
+    }
 }

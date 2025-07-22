@@ -49,7 +49,7 @@ pub struct TempDirFixture {
 
 impl TempDirFixture {
     pub fn new() -> Result<Self> {
-        let temp_dir = TempDir::new().map_err(|e| crate::error::RunceptError::IoError(e))?;
+        let temp_dir = TempDir::new().map_err(crate::error::RunceptError::IoError)?;
 
         Ok(Self { temp_dir })
     }

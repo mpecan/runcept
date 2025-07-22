@@ -67,7 +67,7 @@ auto_restart = false
     let parent_pid = extract_pid_from_list_output(&list_stdout, "parent-with-children")
         .unwrap_or_else(|| {
             println!("Could not find PID for parent process 'parent-with-children'");
-            println!("Full list output:\n{}", list_stdout);
+            println!("Full list output:\n{list_stdout}");
 
             // Get process logs for debugging
             if let Ok(logs_output) = test_env
@@ -132,16 +132,14 @@ auto_restart = false
     // CRITICAL TEST: Verify parent process is killed
     assert!(
         !is_process_alive(parent_pid),
-        "CRITICAL: Parent process PID {} is still alive after stop command",
-        parent_pid
+        "CRITICAL: Parent process PID {parent_pid} is still alive after stop command"
     );
 
     // CRITICAL TEST: Verify child processes are also cleaned up
     for &child_pid in &child_pids {
         assert!(
             !is_process_alive(child_pid),
-            "CRITICAL: Child process PID {} is still alive after parent was stopped. Process group cleanup failed.",
-            child_pid
+            "CRITICAL: Child process PID {child_pid} is still alive after parent was stopped. Process group cleanup failed."
         );
     }
 
@@ -208,7 +206,7 @@ auto_restart = false
     let parent_pid =
         extract_pid_from_list_output(&list_stdout, "nested-parent").unwrap_or_else(|| {
             println!("Could not find PID for nested parent process 'nested-parent'");
-            println!("Full list output:\n{}", list_stdout);
+            println!("Full list output:\n{list_stdout}");
 
             // Get process logs for debugging
             if let Ok(logs_output) = test_env
@@ -251,8 +249,7 @@ auto_restart = false
     for &desc_pid in &descendant_pids {
         assert!(
             !is_process_alive(desc_pid),
-            "Descendant process PID {} should be terminated after parent stop",
-            desc_pid
+            "Descendant process PID {desc_pid} should be terminated after parent stop"
         );
     }
 }
@@ -320,7 +317,7 @@ fn find_child_processes(parent_pid: i32) -> Vec<i32> {
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
-            let parts: Vec<&str> = line.trim().split_whitespace().collect();
+            let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
                 if let (Ok(child_pid), Ok(ppid)) =
                     (parts[0].parse::<i32>(), parts[1].parse::<i32>())

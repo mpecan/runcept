@@ -286,7 +286,7 @@ mod tests {
 
     fn create_test_process(name: &str, command: &str, working_dir: &str) -> Process {
         Process {
-            id: format!("test:{}", name),
+            id: format!("test:{name}"),
             name: name.to_string(),
             command: command.to_string(),
             working_dir: working_dir.to_string(),

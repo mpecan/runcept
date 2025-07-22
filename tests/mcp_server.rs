@@ -1,7 +1,6 @@
 mod common;
 
 use common::{
-    assertions::*,
     environment::{RunceptTestEnvironment, TestConfig},
     fixtures::*,
 };
@@ -56,10 +55,10 @@ async fn test_mcp_server_starts_and_responds() {
         }
         Ok(None) => {
             // Process is still running, which is good
-            assert!(true, "MCP server is running");
+            // MCP server is running - this is expected
         }
         Err(e) => {
-            panic!("Error checking MCP process status: {}", e);
+            panic!("Error checking MCP process status: {e}");
         }
     }
 
@@ -116,74 +115,14 @@ async fn test_mcp_server_with_environment_context() {
             if !exit_status.success() {
                 // Capture stderr for debugging
                 if let Some(mut stderr) = mcp_process.stderr.take() {
-                    use std::io::Read;
                     let mut stderr_content = String::new();
-                    if let Ok(_) = Read::read_to_string(&mut stderr, &mut stderr_content) {
-                        println!("MCP server stderr: {}", stderr_content);
-                    }
-                }
-            }
-        }
-        Ok(None) => {
-            // Still running, which is good
-        }
-        Err(e) => {
-            eprintln!("Error checking MCP process: {}", e);
-        }
-    }
-
-    // Clean up
-    let _ = mcp_process.kill();
-    let _ = mcp_process.wait();
-}
-
-#[tokio::test]
-async fn test_mcp_server_without_environment() {
-    let test_env = RunceptTestEnvironment::with_config(TestConfig {
-        project_name: "mcp-no-environment".to_string(),
-        enable_logging: true,
-        ..TestConfig::default()
-    })
-    .await;
-
-    // Don't activate any environment - test MCP server behavior without context
-
-    // Start MCP server without active environment using centralized helper
-    let mut mcp_process = test_env
-        .spawn_mcp_server()
-        .expect("Failed to start MCP server without environment");
-
-    // Give MCP server time to start
-    sleep(Duration::from_millis(500)).await;
-
-    // Send basic input
-    if let Some(stdin) = mcp_process.stdin.as_mut() {
-        let _ = stdin.write_all(b"\n");
-    }
-
-    // Give it time to process
-    sleep(Duration::from_millis(100)).await;
-
-    // MCP server should handle the case where no environment is active
-    // It might exit gracefully or continue running with limited functionality
-    let process_status = mcp_process.try_wait();
-
-    match process_status {
-        Ok(Some(exit_status)) => {
-            // Process exited - could be expected behavior
-            if !exit_status.success() {
-                // Capture stderr to understand why it failed
-                if let Some(mut stderr) = mcp_process.stderr.take() {
-                    use std::io::Read;
-                    let mut stderr_content = String::new();
-                    if let Ok(_) = std::io::Read::read_to_string(&mut stderr, &mut stderr_content) {
+                    if std::io::Read::read_to_string(&mut stderr, &mut stderr_content).is_ok() {
                         // Should provide meaningful error about missing environment
                         assert!(
                             stderr_content.contains("environment")
                                 || stderr_content.contains("configuration")
                                 || stderr_content.is_empty(), // Empty stderr is acceptable
-                            "MCP server should handle missing environment gracefully. Stderr: {}",
-                            stderr_content
+                            "MCP server should handle missing environment gracefully. Stderr: {stderr_content}"
                         );
                     }
                 }
@@ -193,7 +132,7 @@ async fn test_mcp_server_without_environment() {
             // Still running - should work without environment
         }
         Err(e) => {
-            panic!("Error checking MCP process status: {}", e);
+            panic!("Error checking MCP process status: {e}");
         }
     }
 
@@ -245,18 +184,16 @@ async fn test_mcp_server_handles_invalid_input() {
             if !exit_status.success() {
                 // If it crashes, it should provide meaningful error output
                 if let Some(mut stderr) = mcp_process.stderr.take() {
-                    use std::io::Read;
                     let mut stderr_content = String::new();
-                    if let Ok(_) = std::io::Read::read_to_string(&mut stderr, &mut stderr_content) {
+                    if std::io::Read::read_to_string(&mut stderr, &mut stderr_content).is_ok() {
                         // Should contain some indication of parsing/protocol error
                         assert!(
                             stderr_content.contains("json")
                                 || stderr_content.contains("parse")
                                 || stderr_content.contains("protocol")
                                 || stderr_content.is_empty(), // Empty is acceptable
-                            "MCP server should provide meaningful error for invalid input. Stderr: {}",
-                            stderr_content
-                        );
+                            "MCP server should provide meaningful error for invalid input. Stderr: {stderr_content}"
+        );
                     }
                 }
             }
@@ -265,7 +202,7 @@ async fn test_mcp_server_handles_invalid_input() {
             // Still running - should continue despite invalid input
         }
         Err(e) => {
-            eprintln!("Error checking MCP process after invalid input: {}", e);
+            panic!("Error checking MCP process status: {e}");
         }
     }
 
