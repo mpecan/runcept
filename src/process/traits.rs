@@ -130,7 +130,6 @@ pub trait HealthCheckTrait: Send + Sync {
     ) -> Result<Vec<HealthCheckResult>>;
 }
 
-
 // Supporting types
 
 /// Handle to a running process
@@ -185,4 +184,3 @@ pub struct HealthCheckResult {
     pub duration_ms: u64,
     pub timestamp: DateTime<Utc>,
 }
-

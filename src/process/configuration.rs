@@ -349,8 +349,7 @@ impl ProcessConfigurationManager {
         // Check for reserved names
         if matches!(name, "daemon" | "server" | "all" | "system") {
             return Err(RunceptError::ConfigError(format!(
-                "Process name '{}' is reserved and cannot be used",
-                name
+                "Process name '{name}' is reserved and cannot be used"
             )));
         }
 
@@ -408,15 +407,12 @@ impl ProcessConfigurationManager {
             Ok(_) => true,
             Err(_) => {
                 // Try with --help as fallback
-                match std::process::Command::new(command)
+                std::process::Command::new(command)
                     .arg("--help")
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status()
-                {
-                    Ok(_) => true,
-                    Err(_) => false,
-                }
+                    .is_ok()
             }
         }
     }
@@ -483,11 +479,10 @@ impl ProcessConfigurationManager {
             // Simple HTTP URL validation without external dependencies
             if url.len() < 10
                 || (!url.contains("://")
-                    || url.split("://").nth(1).map_or(true, |part| part.is_empty()))
+                    || url.split("://").nth(1).is_none_or(|part| part.is_empty()))
             {
                 Err(RunceptError::ConfigError(format!(
-                    "Invalid health check URL format '{}'",
-                    url
+                    "Invalid health check URL format '{url}'"
                 )))
             } else {
                 Ok(())
@@ -501,20 +496,17 @@ impl ProcessConfigurationManager {
                     match parts[1].parse::<u16>() {
                         Ok(_) => Ok(()),
                         Err(_) => Err(RunceptError::ConfigError(format!(
-                            "Invalid port in TCP health check URL '{}'",
-                            url
+                            "Invalid port in TCP health check URL '{url}'"
                         ))),
                     }
                 } else {
                     Err(RunceptError::ConfigError(format!(
-                        "Invalid TCP health check URL format '{}', expected tcp://host:port",
-                        url
+                        "Invalid TCP health check URL format '{url}', expected tcp://host:port"
                     )))
                 }
             } else {
                 Err(RunceptError::ConfigError(format!(
-                    "Invalid TCP health check URL format '{}', expected tcp://host:port",
-                    url
+                    "Invalid TCP health check URL format '{url}', expected tcp://host:port"
                 )))
             }
         } else if url.starts_with("cmd://") {
@@ -529,8 +521,7 @@ impl ProcessConfigurationManager {
             }
         } else {
             Err(RunceptError::ConfigError(format!(
-                "Unsupported health check URL scheme in '{}', supported: http://, https://, tcp://, cmd://",
-                url
+                "Unsupported health check URL scheme in '{url}', supported: http://, https://, tcp://, cmd://"
             )))
         }
     }
@@ -568,8 +559,7 @@ impl ProcessConfigurationManager {
             // Check for invalid characters in variable name
             if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                 return Err(RunceptError::ConfigError(format!(
-                    "Environment variable name '{}' contains invalid characters (only alphanumeric and underscore allowed)",
-                    key
+                    "Environment variable name '{key}' contains invalid characters (only alphanumeric and underscore allowed)"
                 )));
             }
 
@@ -581,8 +571,7 @@ impl ProcessConfigurationManager {
             // Validate value (basic checks)
             if value.len() > 4096 {
                 return Err(RunceptError::ConfigError(format!(
-                    "Environment variable '{}' value exceeds maximum length of 4096 characters",
-                    key
+                    "Environment variable '{key}' value exceeds maximum length of 4096 characters"
                 )));
             }
         }
@@ -640,8 +629,7 @@ impl ProcessConfigurationManager {
         ) -> Result<()> {
             if rec_stack.contains(current) {
                 return Err(RunceptError::ConfigError(format!(
-                    "Circular dependency detected involving process '{}'",
-                    current
+                    "Circular dependency detected involving process '{current}'"
                 )));
             }
 

@@ -548,7 +548,10 @@ mod mcp_protocol_tests {
         );
         // Ensure the test file has the correct content
         let content = std::fs::read_to_string(&test_file_path).unwrap();
-        assert_eq!(content, "working_directory_test", "Test file content mismatch");
+        assert_eq!(
+            content, "working_directory_test",
+            "Test file content mismatch"
+        );
 
         // Initialize project
         test_env
@@ -669,7 +672,7 @@ mod mcp_protocol_tests {
             } else {
                 println!("Failed to get daemon logs");
             }
-            
+
             println!("\n=== MCP SERVER LOGS ===");
             if let Ok(mcp_logs) = test_env.test_env.get_mcp_server_logs() {
                 println!("{}", mcp_logs);

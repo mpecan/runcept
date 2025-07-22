@@ -127,10 +127,12 @@ impl DefaultHealthCheckService {
     async fn execute_http_check(&self, url: &str, expected_status: u16) -> Result<bool> {
         debug!("Executing HTTP health check: {}", url);
 
-        let response =
-            self.http_client.get(url).send().await.map_err(|e| {
-                RunceptError::HealthCheckError(format!("HTTP request failed: {}", e))
-            })?;
+        let response = self
+            .http_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| RunceptError::HealthCheckError(format!("HTTP request failed: {e}")))?;
 
         let status_code = response.status().as_u16();
         let success = status_code == expected_status;
@@ -175,7 +177,7 @@ impl DefaultHealthCheckService {
         }
 
         let output = cmd.output().await.map_err(|e| {
-            RunceptError::HealthCheckError(format!("Command execution failed: {}", e))
+            RunceptError::HealthCheckError(format!("Command execution failed: {e}"))
         })?;
 
         let exit_code = output.status.code().unwrap_or(-1);
@@ -283,20 +285,19 @@ pub fn health_check_from_url(
             timeout_secs,
             retries,
         })
-    } else if url.starts_with("tcp://") {
-        let without_scheme = &url[6..]; // Remove "tcp://"
+    } else if let Some(without_scheme) = url.strip_prefix("tcp://") {
+        // Remove "tcp://"
         let parts: Vec<&str> = without_scheme.split(':').collect();
 
         if parts.len() != 2 {
             return Err(RunceptError::HealthCheckError(format!(
-                "Invalid TCP URL format: {}",
-                url
+                "Invalid TCP URL format: {url}"
             )));
         }
 
         let host = parts[0].to_string();
         let port: u16 = parts[1].parse().map_err(|_| {
-            RunceptError::HealthCheckError(format!("Invalid port in TCP URL: {}", url))
+            RunceptError::HealthCheckError(format!("Invalid port in TCP URL: {url}"))
         })?;
 
         Ok(HealthCheckConfig {
@@ -304,8 +305,8 @@ pub fn health_check_from_url(
             timeout_secs,
             retries,
         })
-    } else if url.starts_with("cmd://") {
-        let command = &url[6..]; // Remove "cmd://"
+    } else if let Some(command) = url.strip_prefix("cmd://") {
+        // Remove "cmd://"
 
         Ok(HealthCheckConfig {
             check_type: HealthCheckType::Command {
@@ -317,8 +318,7 @@ pub fn health_check_from_url(
         })
     } else {
         Err(RunceptError::HealthCheckError(format!(
-            "Unsupported health check URL scheme: {}",
-            url
+            "Unsupported health check URL scheme: {url}"
         )))
     }
 }

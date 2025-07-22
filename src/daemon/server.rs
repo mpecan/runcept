@@ -44,7 +44,9 @@ impl DaemonServer {
 
         // Require database - no fallback
         let database_pool = database_pool_arc.ok_or_else(|| {
-            RunceptError::DatabaseError("Database is required for ProcessOrchestrationService".to_string())
+            RunceptError::DatabaseError(
+                "Database is required for ProcessOrchestrationService".to_string(),
+            )
         })?;
 
         // Create the ProcessOrchestrationService

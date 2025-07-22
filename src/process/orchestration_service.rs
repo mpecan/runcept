@@ -70,7 +70,10 @@ where
         );
 
         // Log orchestration activity with tracing
-        info!("Orchestration: Start requested for process '{}:{}' by orchestrator", environment_id, process_name);
+        info!(
+            "Orchestration: Start requested for process '{}:{}' by orchestrator",
+            environment_id, process_name
+        );
 
         // Delegate to execution service
         let execution_service = self.execution_service.read().await;
@@ -350,8 +353,7 @@ where
 
         // Stop each running process
         for process in processes {
-            if matches!(process.status.as_str(), "running" | "starting") {
-            }
+            if matches!(process.status.as_str(), "running" | "starting") {}
         }
 
         info!(

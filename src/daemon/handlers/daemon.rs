@@ -63,7 +63,10 @@ impl DaemonHandles {
         // Count total processes across all active environments
         let mut total_processes = 0;
         for (env_id, _) in &active_environments {
-            if let Ok(processes) = orchestration_service.list_processes_for_environment(env_id).await {
+            if let Ok(processes) = orchestration_service
+                .list_processes_for_environment(env_id)
+                .await
+            {
                 total_processes += processes.len();
             }
         }

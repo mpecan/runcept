@@ -10,9 +10,7 @@ use std::collections::HashMap;
 /// This module consolidates all conversions between Process, ProcessRecord,
 /// ProcessInfo, and ProcessDefinition to eliminate code duplication and
 /// ensure consistent field mapping.
-
 // ProcessDefinition → Process conversions
-
 impl Process {
     /// Create a Process from a ProcessDefinition with additional context
     pub fn from_definition_with_context(
@@ -111,8 +109,7 @@ impl TryFrom<&str> for ProcessStatus {
             "failed" => Ok(ProcessStatus::Failed),
             "crashed" => Ok(ProcessStatus::Crashed),
             _ => Err(crate::error::RunceptError::ProcessError(format!(
-                "Invalid process status: {}",
-                status
+                "Invalid process status: {status}"
             ))),
         }
     }
@@ -190,15 +187,15 @@ pub fn calculate_uptime(created_at: DateTime<Utc>, status: &ProcessStatus) -> Op
         let total_seconds = duration.num_seconds();
 
         if total_seconds < 60 {
-            Some(format!("{}s", total_seconds))
+            Some(format!("{total_seconds}s"))
         } else if total_seconds < 3600 {
             let minutes = total_seconds / 60;
             let seconds = total_seconds % 60;
-            Some(format!("{}m {}s", minutes, seconds))
+            Some(format!("{minutes}m {seconds}s"))
         } else {
             let hours = total_seconds / 3600;
             let minutes = (total_seconds % 3600) / 60;
-            Some(format!("{}h {}m", hours, minutes))
+            Some(format!("{hours}h {minutes}m"))
         }
     } else {
         None

@@ -74,9 +74,7 @@ impl ProcessRuntimeTrait for DefaultProcessRuntime {
         // Debug: Log what we're about to execute
         error!(
             "RUNTIME DEBUG: About to execute: {} {:?} in directory: {}",
-            command_name,
-            args,
-            process.working_dir
+            command_name, args, process.working_dir
         );
 
         // Set up stdio - CRITICAL: We need piped stdout/stderr for capturing
@@ -87,6 +85,7 @@ impl ProcessRuntimeTrait for DefaultProcessRuntime {
         // Create the process in its own process group for proper cleanup
         #[cfg(unix)]
         {
+            #[allow(unused_imports)]
             use std::os::unix::process::CommandExt;
             command.process_group(0); // Create new process group
         }
@@ -114,10 +113,20 @@ impl ProcessRuntimeTrait for DefaultProcessRuntime {
 
         // Take stdout and stderr for capturing
         if let Some(stdout) = child.stdout.take() {
-            Self::spawn_output_capture_task(stdout, process.name.clone(), true, &process.working_dir);
+            Self::spawn_output_capture_task(
+                stdout,
+                process.name.clone(),
+                true,
+                &process.working_dir,
+            );
         }
         if let Some(stderr) = child.stderr.take() {
-            Self::spawn_output_capture_task(stderr, process.name.clone(), false, &process.working_dir);
+            Self::spawn_output_capture_task(
+                stderr,
+                process.name.clone(),
+                false,
+                &process.working_dir,
+            );
         }
 
         // Create shutdown channel
@@ -147,7 +156,7 @@ impl DefaultProcessRuntime {
         // Try graceful termination first
         if let Some(pid) = handle.child.id() {
             use sysinfo::{Signal as SysinfoSignal, System};
-            
+
             let system = System::new_all();
             let sysinfo_pid = sysinfo::Pid::from_u32(pid);
 
@@ -184,8 +193,7 @@ impl DefaultProcessRuntime {
             Err(e) => {
                 error!("Failed to kill process: {}", e);
                 Err(RunceptError::ProcessError(format!(
-                    "Failed to kill process: {}",
-                    e
+                    "Failed to kill process: {e}"
                 )))
             }
         }
@@ -196,7 +204,7 @@ impl DefaultProcessRuntime {
         debug!("Waiting for process exit");
 
         let exit_status = handle.child.wait().await.map_err(|e| {
-            RunceptError::ProcessError(format!("Failed to wait for process exit: {}", e))
+            RunceptError::ProcessError(format!("Failed to wait for process exit: {e}"))
         })?;
 
         let exit_code = exit_status.code();
@@ -214,12 +222,11 @@ impl DefaultProcessRuntime {
 
     /// Spawn a task to capture and log output from a process stream
     fn spawn_output_capture_task<T>(
-        stream: T, 
-        process_name: String, 
-        is_stdout: bool, 
-        working_dir: &str
-    )
-    where
+        stream: T,
+        process_name: String,
+        is_stdout: bool,
+        working_dir: &str,
+    ) where
         T: tokio::io::AsyncRead + Send + Unpin + 'static,
     {
         let working_dir = working_dir.to_string();
@@ -227,15 +234,14 @@ impl DefaultProcessRuntime {
             use tokio::io::{AsyncBufReadExt, BufReader};
 
             // Create a logger for this capture task
-            let logger_result = ProcessLogger::new(
-                process_name.clone(),
-                Path::new(&working_dir).to_path_buf(),
-            ).await;
-            
+            let logger_result =
+                ProcessLogger::new(process_name.clone(), Path::new(&working_dir).to_path_buf())
+                    .await;
+
             let mut logger = match logger_result {
                 Ok(logger) => logger,
                 Err(e) => {
-                    eprintln!("Failed to create logger for process '{}': {}", process_name, e);
+                    eprintln!("Failed to create logger for process '{process_name}': {e}");
                     return;
                 }
             };
@@ -256,7 +262,7 @@ impl DefaultProcessRuntime {
                         logger.log_stderr(trimmed).await
                     };
                     if let Err(e) = result {
-                        eprintln!("Failed to log output for '{}': {}", process_name, e);
+                        eprintln!("Failed to log output for '{process_name}': {e}");
                     }
                 }
                 line.clear();
@@ -345,6 +351,9 @@ mod tests {
         // After termination, the handle should not have a valid child process anymore
         // This is tested by checking if wait() fails or succeeds with an exit status
         let wait_result = runtime.wait_for_exit(&mut handle).await;
-        assert!(wait_result.is_ok(), "Process should have exited after termination");
+        assert!(
+            wait_result.is_ok(),
+            "Process should have exited after termination"
+        );
     }
 }

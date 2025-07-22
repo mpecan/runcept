@@ -56,7 +56,6 @@ mod tests {
             .fetch_one(&db.pool)
             .await;
         assert!(result.is_ok());
-
     }
 
     #[tokio::test]

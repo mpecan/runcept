@@ -129,7 +129,7 @@ impl<'a> QueryManager<'a> {
 
         // Check if the activity_logs table exists (it may have been removed in migration 002)
         let table_exists = sqlx::query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='activity_logs'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='activity_logs'",
         )
         .fetch_optional(self.pool)
         .await?;

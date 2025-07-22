@@ -8,4 +8,7 @@ pub mod mcp;
 pub mod process;
 pub mod scheduler;
 
+#[cfg(test)]
+pub mod test_utils;
+
 pub use error::{Result, RunceptError};

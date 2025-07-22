@@ -31,9 +31,7 @@ pub fn ensure_binaries_built() {
         inherit_coverage_env(&mut build_cmd);
 
         // Execute the build
-        let build_output = build_cmd
-            .output()
-            .expect("Failed to build binaries");
+        let build_output = build_cmd.output().expect("Failed to build binaries");
 
         if !build_output.status.success() {
             panic!(
@@ -71,7 +69,11 @@ pub fn ensure_binaries_built() {
 
         *BINARY_PATHS.lock().unwrap() = Some(paths);
 
-        let coverage_info = if is_coverage_enabled() { " (with coverage instrumentation)" } else { "" };
+        let coverage_info = if is_coverage_enabled() {
+            " (with coverage instrumentation)"
+        } else {
+            ""
+        };
         println!("Binaries built and cached successfully{}", coverage_info);
     });
 }
@@ -98,9 +100,10 @@ fn inherit_coverage_env(cmd: &mut std::process::Command) {
     // Ensure we inherit the current environment as well
     // This catches any other coverage-related variables we might miss
     for (key, value) in env::vars() {
-        if key.starts_with("LLVM_PROFILE") ||
-            key.starts_with("GCOV_") ||
-            key.contains("COV") && key.contains("CARGO") {
+        if key.starts_with("LLVM_PROFILE")
+            || key.starts_with("GCOV_")
+            || key.contains("COV") && key.contains("CARGO")
+        {
             cmd.env(key, value);
         }
     }
@@ -108,14 +111,16 @@ fn inherit_coverage_env(cmd: &mut std::process::Command) {
 
 /// Check if coverage collection is enabled
 fn is_coverage_enabled() -> bool {
-    env::var("LLVM_PROFILE_FILE").is_ok() ||
-        env::var("RUSTFLAGS").unwrap_or_default().contains("instrument-coverage") ||
-        env::var("CARGO_LLVM_COV").is_ok()
+    env::var("LLVM_PROFILE_FILE").is_ok()
+        || env::var("RUSTFLAGS")
+            .unwrap_or_default()
+            .contains("instrument-coverage")
+        || env::var("CARGO_LLVM_COV").is_ok()
 }
 
 /// Get the path to a binary
 pub fn get_binary_path(name: &str) -> PathBuf {
-   get_binary_path_checked(name).unwrap()
+    get_binary_path_checked(name).unwrap()
 }
 
 /// Enhanced version with better error handling and logging
@@ -128,10 +133,14 @@ pub fn get_binary_path_checked(name: &str) -> Result<PathBuf, String> {
             if path.exists() {
                 Ok(path.clone())
             } else {
-                Err(format!("Binary '{}' was built but no longer exists at {}", name, path.display()))
+                Err(format!(
+                    "Binary '{}' was built but no longer exists at {}",
+                    name,
+                    path.display()
+                ))
             }
-        },
-        None => Err(format!("Binary '{}' not found in built binaries", name))
+        }
+        None => Err(format!("Binary '{}' not found in built binaries", name)),
     }
 }
 
@@ -560,7 +569,7 @@ impl RunceptTestEnvironment {
     }
 
     /// Get the MCP server logs for debugging purposes
-   pub fn get_mcp_server_logs(&self) -> Result<String, std::io::Error> {
+    pub fn get_mcp_server_logs(&self) -> Result<String, std::io::Error> {
         let log_path = self.runcept_dir.join("logs").join("mcp-server.log");
         if log_path.exists() {
             std::fs::read_to_string(log_path)
@@ -573,7 +582,7 @@ impl RunceptTestEnvironment {
     }
 
     /// Get the cli logs for debugging purposes
-   pub fn get_cli_logs(&self) -> Result<String, std::io::Error> {
+    pub fn get_cli_logs(&self) -> Result<String, std::io::Error> {
         let log_path = self.runcept_dir.join("logs").join("cli.log");
         if log_path.exists() {
             std::fs::read_to_string(log_path)
@@ -584,7 +593,6 @@ impl RunceptTestEnvironment {
             ))
         }
     }
-
 }
 
 impl Drop for RunceptTestEnvironment {

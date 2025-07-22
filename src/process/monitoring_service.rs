@@ -1,7 +1,7 @@
 use crate::process::{ProcessLogger, ProcessRepositoryTrait};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::{debug, error, info};
 
 /// Notification sent when a process exits
@@ -30,7 +30,7 @@ where
     /// Create a new ProcessMonitoringService
     pub fn new(process_repository: Arc<R>) -> Self {
         let (exit_notification_tx, _) = broadcast::channel(100);
-        
+
         let mut service = Self {
             process_repository,
             exit_notification_tx,
@@ -51,12 +51,14 @@ where
     fn start_exit_notification_listener(&mut self) {
         let mut rx = self.exit_notification_tx.subscribe();
         let repository = self.process_repository.clone();
-        
+
         tokio::spawn(async move {
             while let Ok(notification) = rx.recv().await {
                 debug!(
                     "Received exit notification for process '{}' in environment '{}' with status: {}",
-                    notification.process_name, notification.environment_id, notification.exit_status
+                    notification.process_name,
+                    notification.environment_id,
+                    notification.exit_status
                 );
 
                 // Determine the new status based on exit code and current status
@@ -80,7 +82,11 @@ where
 
                 // Update process status in database
                 if let Err(e) = repository
-                    .update_process_status(&notification.environment_id, &notification.process_name, new_status)
+                    .update_process_status(
+                        &notification.environment_id,
+                        &notification.process_name,
+                        new_status,
+                    )
                     .await
                 {
                     error!(
@@ -103,13 +109,18 @@ where
                 // Log the process exit event
                 info!(
                     "Process '{}:{}' exited with code {:?}, new status: '{}'",
-                    notification.environment_id, notification.process_name,
-                    notification.exit_status.code(), new_status
+                    notification.environment_id,
+                    notification.process_name,
+                    notification.exit_status.code(),
+                    new_status
                 );
 
                 info!(
                     "Updated process '{}:{}' status to '{}' after exit with code {:?}",
-                    notification.environment_id, notification.process_name, new_status, notification.exit_status.code()
+                    notification.environment_id,
+                    notification.process_name,
+                    new_status,
+                    notification.exit_status.code()
                 );
             }
         });
@@ -187,7 +198,7 @@ where
                         "Waiting for process '{}' in environment '{}' to actually exit after shutdown signal",
                         process_name, environment_id
                     );
-                    
+
                     match child.wait().await {
                         Ok(exit_status) => {
                             info!(
@@ -203,7 +214,8 @@ where
                             };
 
                             if let Ok(mut logger) =
-                                ProcessLogger::new(process_name.clone(), working_dir.to_path_buf()).await
+                                ProcessLogger::new(process_name.clone(), working_dir.to_path_buf())
+                                    .await
                             {
                                 let _ = logger
                                     .log_lifecycle(&format!(
@@ -233,7 +245,8 @@ where
 }
 
 // Type alias for the default concrete implementation
-pub type DefaultProcessMonitoringService = ProcessMonitoringService<crate::database::ProcessRepository>;
+pub type DefaultProcessMonitoringService =
+    ProcessMonitoringService<crate::database::ProcessRepository>;
 
 impl DefaultProcessMonitoringService {
     /// Create a new ProcessMonitoringService with default implementations
@@ -246,159 +259,17 @@ impl DefaultProcessMonitoringService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::process_repository::ProcessRecord;
-    use crate::error::Result;
-    use async_trait::async_trait;
-    use chrono::Utc;
-    use std::collections::HashMap;
-    use std::sync::Mutex as StdMutex;
-    use tokio::sync::broadcast;
+    use crate::test_utils::{MockProcessRepository, ProcessRecordBuilder, TempDirFixture};
     use std::os::unix::process::ExitStatusExt;
-
-    // Mock repository for testing
-    #[derive(Debug)]
-    struct MockProcessRepository {
-        processes: StdMutex<HashMap<String, ProcessRecord>>,
-        status_updates: StdMutex<Vec<(String, String, String)>>, // env_id, name, status
-        pid_clears: StdMutex<Vec<(String, String)>>, // env_id, name
-    }
-
-    impl MockProcessRepository {
-        fn new() -> Self {
-            Self {
-                processes: StdMutex::new(HashMap::new()),
-                status_updates: StdMutex::new(Vec::new()),
-                pid_clears: StdMutex::new(Vec::new()),
-            }
-        }
-
-        fn add_process(&self, process: ProcessRecord) {
-            let key = format!("{}:{}", process.environment_id, process.name);
-            self.processes.lock().unwrap().insert(key, process);
-        }
-
-        fn get_status_updates(&self) -> Vec<(String, String, String)> {
-            self.status_updates.lock().unwrap().clone()
-        }
-
-        fn get_pid_clears(&self) -> Vec<(String, String)> {
-            self.pid_clears.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl ProcessRepositoryTrait for MockProcessRepository {
-        async fn insert_process(&self, _process: &crate::process::Process) -> Result<()> {
-            Ok(())
-        }
-
-        async fn get_process_by_name(
-            &self,
-            environment_id: &str,
-            name: &str,
-        ) -> Result<Option<ProcessRecord>> {
-            let key = format!("{environment_id}:{name}");
-            Ok(self.processes.lock().unwrap().get(&key).cloned())
-        }
-
-        async fn get_process_by_name_validated(
-            &self,
-            environment_id: &str,
-            name: &str,
-        ) -> Result<Option<ProcessRecord>> {
-            self.get_process_by_name(environment_id, name).await
-        }
-
-        async fn delete_process(&self, _environment_id: &str, _name: &str) -> Result<bool> {
-            Ok(true)
-        }
-
-        async fn update_process_status(
-            &self,
-            environment_id: &str,
-            name: &str,
-            status: &str,
-        ) -> Result<()> {
-            self.status_updates.lock().unwrap().push((
-                environment_id.to_string(),
-                name.to_string(),
-                status.to_string(),
-            ));
-            Ok(())
-        }
-
-        async fn get_running_processes(&self) -> Result<Vec<(String, String, Option<i64>)>> {
-            Ok(Vec::new())
-        }
-
-        async fn get_processes_by_status(&self, _status: &str) -> Result<Vec<ProcessRecord>> {
-            Ok(Vec::new())
-        }
-
-        async fn set_process_pid(&self, _environment_id: &str, _name: &str, _pid: i64) -> Result<()> {
-            Ok(())
-        }
-
-        async fn clear_process_pid(&self, environment_id: &str, name: &str) -> Result<()> {
-            self.pid_clears.lock().unwrap().push((
-                environment_id.to_string(),
-                name.to_string(),
-            ));
-            Ok(())
-        }
-
-        async fn get_processes_by_environment(
-            &self,
-            _environment_id: &str,
-        ) -> Result<Vec<ProcessRecord>> {
-            Ok(Vec::new())
-        }
-
-        async fn validate_environment(&self, _environment_id: &str) -> Result<bool> {
-            Ok(true)
-        }
-
-        async fn cleanup_processes_by_environment(&self, _environment_id: &str) -> Result<u64> {
-            Ok(0)
-        }
-
-        async fn update_process_command(
-            &self,
-            _environment_id: &str,
-            _name: &str,
-            _command: &str,
-        ) -> Result<()> {
-            Ok(())
-        }
-
-        async fn update_process_working_dir(
-            &self,
-            _environment_id: &str,
-            _name: &str,
-            _working_dir: &str,
-        ) -> Result<()> {
-            Ok(())
-        }
-
-        async fn update_process_activity(&self, _environment_id: &str, _name: &str) -> Result<()> {
-            Ok(())
-        }
-
-        async fn count_processes_by_environment(&self, _environment_id: &str) -> Result<i64> {
-            Ok(0)
-        }
-
-        async fn count_processes_by_status(&self, _status: &str) -> Result<i64> {
-            Ok(0)
-        }
-    }
+    use tokio::sync::broadcast;
 
     #[tokio::test]
     async fn test_monitoring_service_creation() {
         let mock_repo = Arc::new(MockProcessRepository::new());
         let service = ProcessMonitoringService::new(mock_repo);
 
-        assert!(service.exit_notification_tx.receiver_count() >= 0);
+        // Receiver count is always >= 0, so just check that we can get the count
+        let _receiver_count = service.exit_notification_tx.receiver_count();
     }
 
     #[tokio::test]
@@ -416,7 +287,10 @@ mod tests {
             exit_status: std::process::ExitStatus::from_raw(0),
         };
 
-        service.exit_notification_tx.send(notification.clone()).unwrap();
+        service
+            .exit_notification_tx
+            .send(notification.clone())
+            .unwrap();
 
         // Both receivers should get the notification
         let received1 = rx1.recv().await.unwrap();
@@ -431,19 +305,14 @@ mod tests {
     #[tokio::test]
     async fn test_successful_exit_status_update() {
         let mock_repo = Arc::new(MockProcessRepository::new());
-        
-        // Add a process that's not in "stopping" state
-        mock_repo.add_process(ProcessRecord {
-            id: "test-env:test-process".to_string(),
-            name: "test-process".to_string(),
-            command: "echo test".to_string(),
-            working_dir: "/tmp".to_string(),
-            environment_id: "test-env".to_string(),
-            status: "running".to_string(),
-            pid: Some(1234),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        });
+
+        // Add a process that's not in "stopping" state using the builder
+        let test_process = ProcessRecordBuilder::new("test-process")
+            .with_environment("test-env")
+            .with_status("running")
+            .with_pid(1234)
+            .build();
+        mock_repo.add_process(test_process);
 
         let service = ProcessMonitoringService::new(mock_repo.clone());
 
@@ -462,30 +331,35 @@ mod tests {
         // Check that status was updated to "stopped"
         let status_updates = mock_repo.get_status_updates();
         assert_eq!(status_updates.len(), 1);
-        assert_eq!(status_updates[0], ("test-env".to_string(), "test-process".to_string(), "stopped".to_string()));
+        assert_eq!(
+            status_updates[0],
+            (
+                "test-env".to_string(),
+                "test-process".to_string(),
+                "stopped".to_string()
+            )
+        );
 
         // Check that PID was cleared
         let pid_clears = mock_repo.get_pid_clears();
         assert_eq!(pid_clears.len(), 1);
-        assert_eq!(pid_clears[0], ("test-env".to_string(), "test-process".to_string()));
+        assert_eq!(
+            pid_clears[0],
+            ("test-env".to_string(), "test-process".to_string())
+        );
     }
 
     #[tokio::test]
     async fn test_failed_exit_status_update() {
         let mock_repo = Arc::new(MockProcessRepository::new());
-        
-        // Add a process that's not in "stopping" state
-        mock_repo.add_process(ProcessRecord {
-            id: "test-env:test-process".to_string(),
-            name: "test-process".to_string(),
-            command: "echo test".to_string(),
-            working_dir: "/tmp".to_string(),
-            environment_id: "test-env".to_string(),
-            status: "running".to_string(),
-            pid: Some(1234),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        });
+
+        // Add a process that's not in "stopping" state using the builder
+        let test_process = ProcessRecordBuilder::new("test-process")
+            .with_environment("test-env")
+            .with_status("running")
+            .with_pid(1234)
+            .build();
+        mock_repo.add_process(test_process);
 
         let service = ProcessMonitoringService::new(mock_repo.clone());
 
@@ -504,25 +378,27 @@ mod tests {
         // Check that status was updated to "crashed"
         let status_updates = mock_repo.get_status_updates();
         assert_eq!(status_updates.len(), 1);
-        assert_eq!(status_updates[0], ("test-env".to_string(), "test-process".to_string(), "crashed".to_string()));
+        assert_eq!(
+            status_updates[0],
+            (
+                "test-env".to_string(),
+                "test-process".to_string(),
+                "crashed".to_string()
+            )
+        );
     }
 
     #[tokio::test]
     async fn test_stopping_process_marked_as_stopped() {
         let mock_repo = Arc::new(MockProcessRepository::new());
-        
-        // Add a process in "stopping" state
-        mock_repo.add_process(ProcessRecord {
-            id: "test-env:test-process".to_string(),
-            name: "test-process".to_string(),
-            command: "echo test".to_string(),
-            working_dir: "/tmp".to_string(),
-            environment_id: "test-env".to_string(),
-            status: "stopping".to_string(),
-            pid: Some(1234),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        });
+
+        // Add a process in "stopping" state using the builder
+        let test_process = ProcessRecordBuilder::new("test-process")
+            .with_environment("test-env")
+            .with_status("stopping")
+            .with_pid(1234)
+            .build();
+        mock_repo.add_process(test_process);
 
         let service = ProcessMonitoringService::new(mock_repo.clone());
 
@@ -541,15 +417,20 @@ mod tests {
         // Check that status was updated to "stopped" (not "crashed") because it was stopping
         let status_updates = mock_repo.get_status_updates();
         assert_eq!(status_updates.len(), 1);
-        assert_eq!(status_updates[0], ("test-env".to_string(), "test-process".to_string(), "stopped".to_string()));
+        assert_eq!(
+            status_updates[0],
+            (
+                "test-env".to_string(),
+                "test-process".to_string(),
+                "stopped".to_string()
+            )
+        );
     }
 
     #[tokio::test]
     async fn test_spawn_monitoring_task() {
-        use tempfile::TempDir;
-        
-        let temp_dir = TempDir::new().unwrap();
-        let working_dir = temp_dir.path().to_path_buf();
+        let temp_dir_fixture = TempDirFixture::new().unwrap();
+        let working_dir = temp_dir_fixture.path().to_path_buf();
 
         let (tx, _rx) = broadcast::channel(10);
         let (_shutdown_tx, shutdown_rx) = tokio::sync::mpsc::channel(1);
@@ -559,7 +440,7 @@ mod tests {
             .arg("0.1")
             .spawn()
             .unwrap();
-        
+
         let child_handle = Arc::new(Mutex::new(Some(child)));
 
         // Spawn monitoring task
@@ -576,10 +457,10 @@ mod tests {
         let mut rx = tx.subscribe();
 
         // Wait for the process to exit and notification to be sent
-        let notification = tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            rx.recv()
-        ).await.unwrap().unwrap();
+        let notification = tokio::time::timeout(tokio::time::Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(notification.process_name, "test-process");
         assert_eq!(notification.environment_id, "test-env");

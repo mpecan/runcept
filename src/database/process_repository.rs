@@ -15,6 +15,11 @@ impl ProcessRepository {
         Self { pool }
     }
 
+    /// Generate a process ID from environment and name
+    fn process_id(environment_id: &str, name: &str) -> String {
+        format!("{environment_id}:{name}")
+    }
+
     /// Get all processes marked as running in the database
     pub async fn get_running_processes(&self) -> Result<Vec<(String, String, Option<i64>)>> {
         let rows = sqlx::query(
@@ -46,7 +51,7 @@ impl ProcessRepository {
         name: &str,
         status: &str,
     ) -> Result<()> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.update_process_status_by_id(&process_id, status).await
     }
 
@@ -62,14 +67,19 @@ impl ProcessRepository {
         .bind(status)
         .bind(process_id)
         .execute(self.pool.as_ref())
-        .await?;
+        .await
+        .map_err(|e| {
+            crate::error::RunceptError::DatabaseError(format!(
+                "Failed to update process status for '{process_id}' to '{status}': {e}"
+            ))
+        })?;
 
         Ok(())
     }
 
     /// Clear process PID in the database
     pub async fn clear_process_pid(&self, environment_id: &str, name: &str) -> Result<()> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.clear_process_pid_by_id(&process_id).await
     }
 
@@ -84,14 +94,19 @@ impl ProcessRepository {
         )
         .bind(process_id)
         .execute(self.pool.as_ref())
-        .await?;
+        .await
+        .map_err(|e| {
+            crate::error::RunceptError::DatabaseError(format!(
+                "Failed to clear PID for process '{process_id}': {e}"
+            ))
+        })?;
 
         Ok(())
     }
 
     /// Set process PID in the database
     pub async fn set_process_pid(&self, environment_id: &str, name: &str, pid: i64) -> Result<()> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.set_process_pid_by_id(&process_id, pid).await
     }
 
@@ -107,7 +122,12 @@ impl ProcessRepository {
         .bind(pid)
         .bind(process_id)
         .execute(self.pool.as_ref())
-        .await?;
+        .await
+        .map_err(|e| {
+            crate::error::RunceptError::DatabaseError(format!(
+                "Failed to set PID {pid} for process '{process_id}': {e}"
+            ))
+        })?;
 
         Ok(())
     }
@@ -143,7 +163,13 @@ impl ProcessRepository {
         .bind(serde_json::to_string(&process.depends_on).unwrap_or_default())
         .bind(serde_json::to_string(&process.env_vars).unwrap_or_default())
         .execute(self.pool.as_ref())
-        .await?;
+        .await
+        .map_err(|e| {
+            crate::error::RunceptError::DatabaseError(format!(
+                "Failed to insert/update process '{}:{}': {e}",
+                process.environment_id, process.name
+            ))
+        })?;
 
         Ok(())
     }
@@ -187,7 +213,7 @@ impl ProcessRepository {
 
     /// Delete a process from the database
     pub async fn delete_process(&self, environment_id: &str, name: &str) -> Result<bool> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.delete_process_by_id(&process_id).await
     }
 
@@ -203,7 +229,7 @@ impl ProcessRepository {
 
     /// Update process last activity time
     pub async fn update_process_activity(&self, environment_id: &str, name: &str) -> Result<()> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.update_process_activity_by_id(&process_id).await
     }
 
@@ -262,7 +288,7 @@ impl ProcessRepository {
         environment_id: &str,
         name: &str,
     ) -> Result<Option<ProcessRecord>> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.get_process_by_id(&process_id).await
     }
 
@@ -370,7 +396,7 @@ impl ProcessRepository {
         name: &str,
         command: &str,
     ) -> Result<()> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.update_process_command_by_id(&process_id, command)
             .await
     }
@@ -401,7 +427,7 @@ impl ProcessRepository {
         name: &str,
         working_dir: &str,
     ) -> Result<()> {
-        let process_id = format!("{environment_id}:{name}");
+        let process_id = Self::process_id(environment_id, name);
         self.update_process_working_dir_by_id(&process_id, working_dir)
             .await
     }
@@ -590,87 +616,30 @@ pub struct ProcessRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::Database;
-    use crate::process::{Process, ProcessStatus};
-    use chrono::Utc;
-    use std::collections::HashMap;
+    use crate::process::ProcessStatus;
+    use crate::test_utils::{DatabaseFixture, ProcessBuilder};
     use uuid::Uuid;
-
-    /// Helper function to create a test environment in the database
-    async fn create_test_environment(db: &Database, environment_id: &str) {
-        let now = chrono::Utc::now();
-        sqlx::query(
-            r#"
-            INSERT INTO environments (id, name, description, project_path, config_path, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(environment_id)
-        .bind("test_env")
-        .bind("Test Environment")
-        .bind("/tmp/test")
-        .bind("/tmp/test/.runcept.toml")
-        .bind("active")
-        .bind(now)
-        .bind(now)
-        .execute(db.get_pool())
-        .await
-        .unwrap();
-    }
-
-    /// Helper function to create a test Process struct
-    fn create_test_process(
-        process_id: &str,
-        name: &str,
-        command: &str,
-        working_dir: &str,
-        environment_id: &str,
-        status: ProcessStatus,
-        pid: Option<u32>,
-    ) -> Process {
-        Process {
-            id: process_id.to_string(),
-            name: name.to_string(),
-            command: command.to_string(),
-            working_dir: working_dir.to_string(),
-            environment_id: environment_id.to_string(),
-            pid,
-            status,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            last_activity: None,
-            auto_restart: false,
-            health_check_url: None,
-            health_check_interval: None,
-            depends_on: Vec::new(),
-            env_vars: HashMap::new(),
-        }
-    }
 
     #[tokio::test]
     async fn test_process_repository_crud() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let repo = ProcessRepository::new(Arc::new(db.get_pool().clone()));
+        let db_fixture = DatabaseFixture::new().await.unwrap();
+        let repo = ProcessRepository::new(db_fixture.pool.clone());
 
         // Create a test process
         let environment_id = Uuid::new_v4().to_string();
-        let process_id = format!("{environment_id}:test_process");
 
         // Create test environment first
-        create_test_environment(&db, &environment_id).await;
+        db_fixture
+            .create_test_environment(&environment_id)
+            .await
+            .unwrap();
 
-        // Create and insert process
-        let test_process = create_test_process(
-            &process_id,
-            "test_process",
-            "echo hello",
-            "/tmp",
-            &environment_id,
-            ProcessStatus::Running,
-            Some(1234),
-        );
+        // Create and insert process using the builder
+        let test_process = ProcessBuilder::new("test_process")
+            .with_environment(&environment_id)
+            .with_status(ProcessStatus::Running)
+            .with_pid(1234)
+            .build();
         repo.insert_process(&test_process).await.unwrap();
 
         // Get process by name
@@ -722,27 +691,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_running_processes() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let repo = ProcessRepository::new(Arc::new(db.get_pool().clone()));
+        let db_fixture = DatabaseFixture::new().await.unwrap();
+        let repo = ProcessRepository::new(db_fixture.pool.clone());
 
         let environment_id = Uuid::new_v4().to_string();
         let process_id = format!("{environment_id}:test_process");
 
         // Create test environment first
-        create_test_environment(&db, &environment_id).await;
+        db_fixture
+            .create_test_environment(&environment_id)
+            .await
+            .unwrap();
 
-        // Create and insert running process
-        let test_process = create_test_process(
-            &process_id,
-            "test_process",
-            "echo hello",
-            "/tmp",
-            &environment_id,
-            ProcessStatus::Running,
-            Some(1234),
-        );
+        // Create and insert running process using the builder
+        let test_process = ProcessBuilder::new("test_process")
+            .with_environment(&environment_id)
+            .with_status(ProcessStatus::Running)
+            .with_pid(1234)
+            .build();
         repo.insert_process(&test_process).await.unwrap();
 
         // Get running processes
