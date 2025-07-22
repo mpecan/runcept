@@ -218,8 +218,8 @@ impl<H: HealthCheckTrait> HealthMonitor<H> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::{HealthCheckResult, HealthCheckType, MockHealthCheckTrait};
     use crate::process::{Process, ProcessStatus};
-    use crate::process::{MockHealthCheckTrait, HealthCheckResult, HealthCheckType};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -309,20 +309,18 @@ mod tests {
     #[tokio::test]
     async fn test_tcp_health_check() {
         let mut mock_health = MockHealthCheckTrait::new();
-        mock_health
-            .expect_execute_health_check()
-            .returning(|_| {
-                Ok(HealthCheckResult {
-                    check_type: HealthCheckType::Http {
-                        url: "http://localhost:8080".to_string(),
-                        expected_status: 200,
-                    },
-                    success: true,
-                    message: "Mock health check passed".to_string(),
-                    duration_ms: 10,
-                    timestamp: chrono::Utc::now(),
-                })
-            });
+        mock_health.expect_execute_health_check().returning(|_| {
+            Ok(HealthCheckResult {
+                check_type: HealthCheckType::Http {
+                    url: "http://localhost:8080".to_string(),
+                    expected_status: 200,
+                },
+                success: true,
+                message: "Mock health check passed".to_string(),
+                duration_ms: 10,
+                timestamp: chrono::Utc::now(),
+            })
+        });
         let mock_health = Arc::new(mock_health);
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
@@ -343,20 +341,18 @@ mod tests {
     #[tokio::test]
     async fn test_command_health_check() {
         let mut mock_health = MockHealthCheckTrait::new();
-        mock_health
-            .expect_execute_health_check()
-            .returning(|_| {
-                Ok(HealthCheckResult {
-                    check_type: HealthCheckType::Http {
-                        url: "http://localhost:8080".to_string(),
-                        expected_status: 200,
-                    },
-                    success: true,
-                    message: "Mock health check passed".to_string(),
-                    duration_ms: 10,
-                    timestamp: chrono::Utc::now(),
-                })
-            });
+        mock_health.expect_execute_health_check().returning(|_| {
+            Ok(HealthCheckResult {
+                check_type: HealthCheckType::Http {
+                    url: "http://localhost:8080".to_string(),
+                    expected_status: 200,
+                },
+                success: true,
+                message: "Mock health check passed".to_string(),
+                duration_ms: 10,
+                timestamp: chrono::Utc::now(),
+            })
+        });
         let mock_health = Arc::new(mock_health);
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 
@@ -376,20 +372,18 @@ mod tests {
     async fn test_failing_command_health_check() {
         // Configure mock to return failure
         let mut mock_health = MockHealthCheckTrait::new();
-        mock_health
-            .expect_execute_health_check()
-            .returning(|_| {
-                Ok(HealthCheckResult {
-                    check_type: HealthCheckType::Http {
-                        url: "http://localhost:8080".to_string(),
-                        expected_status: 200,
-                    },
-                    success: false,
-                    message: "Mock health check failed".to_string(),
-                    duration_ms: 10,
-                    timestamp: chrono::Utc::now(),
-                })
-            });
+        mock_health.expect_execute_health_check().returning(|_| {
+            Ok(HealthCheckResult {
+                check_type: HealthCheckType::Http {
+                    url: "http://localhost:8080".to_string(),
+                    expected_status: 200,
+                },
+                success: false,
+                message: "Mock health check failed".to_string(),
+                duration_ms: 10,
+                timestamp: chrono::Utc::now(),
+            })
+        });
         let mock_health = Arc::new(mock_health);
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
 

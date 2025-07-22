@@ -604,8 +604,10 @@ impl DefaultProcessLifecycleManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::{
+        MockHealthCheckTrait, MockProcessRepositoryTrait, MockProcessRuntimeTrait,
+    };
     use crate::test_utils::DatabaseFixture;
-    use crate::process::{MockHealthCheckTrait, MockProcessRepositoryTrait, MockProcessRuntimeTrait};
 
     #[tokio::test]
     async fn test_lifecycle_manager_creation() {
