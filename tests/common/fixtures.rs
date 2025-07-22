@@ -9,8 +9,9 @@ pub fn basic_test_config() -> String {
     } else {
         "echo 'Hello World'"
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "test-env"
 
@@ -18,7 +19,8 @@ name = "test-env"
 name = "test-process"
 command = "{echo_cmd}"
 auto_restart = false
-"#)
+"#
+    )
 }
 
 /// Configuration with health check (will fail)
@@ -28,8 +30,9 @@ pub fn failing_health_check_config() -> String {
     } else {
         "sleep 30"
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "health-check-env"
 
@@ -39,7 +42,8 @@ command = "{sleep_cmd}"
 health_check_url = "http://localhost:9999/health"
 health_check_interval = 1
 auto_restart = false
-"#)
+"#
+    )
 }
 
 /// Configuration with successful health check
@@ -62,12 +66,17 @@ auto_restart = false
 /// Multi-process configuration
 pub fn multi_process_config() -> String {
     let (sleep_10, sleep_5, echo_done) = if cfg!(windows) {
-        ("timeout /t 10 /nobreak", "timeout /t 5 /nobreak", "echo Done")
+        (
+            "timeout /t 10 /nobreak",
+            "timeout /t 5 /nobreak",
+            "echo Done",
+        )
     } else {
         ("sleep 10", "sleep 5", "echo 'Done'")
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "multi-env"
 
@@ -85,7 +94,8 @@ auto_restart = false
 name = "quick-task"
 command = "{echo_done}"
 auto_restart = false
-"#)
+"#
+    )
 }
 
 /// Configuration with auto-restart enabled
@@ -95,8 +105,9 @@ pub fn auto_restart_config() -> String {
     } else {
         "bash -c 'echo Starting; sleep 2; exit 1'"
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "restart-env"
 
@@ -106,18 +117,16 @@ command = "{restart_cmd}"
 auto_restart = true
 restart_delay = 1000
 max_restarts = 3
-"#)
+"#
+    )
 }
 
 /// Configuration with working directory
 pub fn working_dir_config() -> String {
-    let pwd_cmd = if cfg!(windows) {
-        "cd"
-    } else {
-        "pwd"
-    };
-    
-    format!(r#"
+    let pwd_cmd = if cfg!(windows) { "cd" } else { "pwd" };
+
+    format!(
+        r#"
 [environment]
 name = "working-dir-env"
 
@@ -126,7 +135,8 @@ name = "pwd-process"
 command = "{pwd_cmd}"
 working_dir = "src"
 auto_restart = false
-"#)
+"#
+    )
 }
 
 /// Configuration with environment variables
@@ -136,8 +146,9 @@ pub fn env_vars_config() -> String {
     } else {
         "env | grep TEST_VAR"
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "env-vars-env"
 
@@ -149,7 +160,8 @@ auto_restart = false
 [processes.env-process.env]
 TEST_VAR = "test-value"
 ANOTHER_VAR = "another-value"
-"#)
+"#
+    )
 }
 
 /// Configuration for testing process groups (parent spawns children)
@@ -159,8 +171,9 @@ pub fn process_group_config() -> String {
     } else {
         "bash -c 'echo Parent PID: $$; sleep 2 && sleep 4 && wait'"
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "process-group-env"
 
@@ -168,7 +181,8 @@ name = "process-group-env"
 name = "parent-process"
 command = "{parent_cmd}"
 auto_restart = false
-"#)
+"#
+    )
 }
 
 /// Configuration for MCP testing
@@ -202,12 +216,15 @@ name = "empty-env"
 /// Configuration with TCP health check
 pub fn tcp_health_check_config(port: u16) -> String {
     let tcp_cmd = if cfg!(windows) {
-        format!("powershell -Command \"$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, {port}); $listener.Start(); Start-Sleep 30; $listener.Stop()\"")
+        format!(
+            "powershell -Command \"$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, {port}); $listener.Start(); Start-Sleep 30; $listener.Stop()\""
+        )
     } else {
         format!("nc -l {port}")
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "tcp-env"
 
@@ -217,7 +234,8 @@ command = "{tcp_cmd}"
 health_check_url = "tcp://localhost:{port}"
 health_check_interval = 1
 auto_restart = false
-"#)
+"#
+    )
 }
 
 /// Configuration with command health check
@@ -227,8 +245,9 @@ pub fn command_health_check_config() -> String {
     } else {
         ("sleep 10", "cmd://echo 'healthy'")
     };
-    
-    format!(r#"
+
+    format!(
+        r#"
 [environment]
 name = "command-env"
 
@@ -238,7 +257,8 @@ command = "{sleep_cmd}"
 health_check_url = "{health_cmd}"
 health_check_interval = 1
 auto_restart = false
-"#)
+"#
+    )
 }
 
 /// Get a random available port for testing
