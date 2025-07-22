@@ -2,7 +2,7 @@
 name = "runcept"
 version = "0.1.0"
 edition = "2024"
-authors = ["mpecan <noreply@example.com>"]
+authors = ["mpecan <matjaz.pecan@gmail.com>"]
 description = "Runcept - A Rust-based process manager that runs and intercepts sync processes with MCP server and CLI interface"
 license = "MIT"
 repository = "https://github.com/mpecan/runcept"
@@ -22,7 +22,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.9"
 clap = { version = "4.5", features = ["derive"] }
-anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "2.0"
 tracing = "0.1"
@@ -31,9 +30,6 @@ tracing-appender = "0.2"
 uuid = { version = "1.17", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 sysinfo = "0.32"
-signal-hook = "0.3"
-signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
-libc = "0.2"
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
 reqwest = { version = "0.12", features = ["json"] }
 rmcp = { version = "0.2.1", features = ["server", "transport-io", "client","transport-child-process", "macros"] }
