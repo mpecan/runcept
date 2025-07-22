@@ -497,8 +497,6 @@ mod tests {
     async fn test_cleanup_old_activities() {
         let tracker = ActivityTracker::new();
 
-        // Add recent and old activities
-        tracker.record_process_activity("recent-process").await;
 
         // Create an old activity using a safe approach
         let old_instant = {
@@ -524,6 +522,11 @@ mod tests {
                 },
             );
         }
+
+        sleep(Duration::from_secs(1)).await; // Ensure the time has advanced
+
+        // Add recent and old activities
+        tracker.record_process_activity("recent-process").await;
 
         let cleaned = tracker
             .cleanup_old_activities(Duration::from_secs(3600))
