@@ -604,16 +604,15 @@ impl DefaultProcessLifecycleManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        DatabaseFixture, MockHealthCheckService, MockProcessRepository, MockProcessRuntime,
-    };
+    use crate::test_utils::DatabaseFixture;
+    use crate::process::{MockHealthCheckTrait, MockProcessRepositoryTrait, MockProcessRuntimeTrait};
 
     #[tokio::test]
     async fn test_lifecycle_manager_creation() {
         let global_config = crate::config::GlobalConfig::default();
-        let mock_repo = Arc::new(MockProcessRepository::new());
-        let mock_runtime = Arc::new(MockProcessRuntime);
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mock_repo = Arc::new(MockProcessRepositoryTrait::new());
+        let mock_runtime = Arc::new(MockProcessRuntimeTrait::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitoring_service = Arc::new(ProcessMonitoringService::new(mock_repo.clone()));
 
         // Create a real ProcessRepository for the configuration manager
@@ -647,9 +646,13 @@ mod tests {
     #[tokio::test]
     async fn test_start_nonexistent_process() {
         let global_config = crate::config::GlobalConfig::default();
-        let mock_repo = Arc::new(MockProcessRepository::new());
-        let mock_runtime = Arc::new(MockProcessRuntime);
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mut mock_repo = MockProcessRepositoryTrait::new();
+        mock_repo
+            .expect_get_process_by_name()
+            .returning(|_, _| Ok(None)); // Return None for nonexistent process
+        let mock_repo = Arc::new(mock_repo);
+        let mock_runtime = Arc::new(MockProcessRuntimeTrait::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitoring_service = Arc::new(ProcessMonitoringService::new(mock_repo.clone()));
 
         // Create a real ProcessRepository with in-memory database for configuration manager
@@ -688,9 +691,13 @@ mod tests {
     #[tokio::test]
     async fn test_stop_nonexistent_process() {
         let global_config = crate::config::GlobalConfig::default();
-        let mock_repo = Arc::new(MockProcessRepository::new());
-        let mock_runtime = Arc::new(MockProcessRuntime);
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mut mock_repo = MockProcessRepositoryTrait::new();
+        mock_repo
+            .expect_get_process_by_name()
+            .returning(|_, _| Ok(None)); // Return None for nonexistent process
+        let mock_repo = Arc::new(mock_repo);
+        let mock_runtime = Arc::new(MockProcessRuntimeTrait::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitoring_service = Arc::new(ProcessMonitoringService::new(mock_repo.clone()));
 
         // Create a real ProcessRepository with in-memory database for configuration manager
@@ -729,9 +736,9 @@ mod tests {
     #[tokio::test]
     async fn test_remove_process_from_tracking() {
         let global_config = crate::config::GlobalConfig::default();
-        let mock_repo = Arc::new(MockProcessRepository::new());
-        let mock_runtime = Arc::new(MockProcessRuntime);
-        let mock_health = Arc::new(MockHealthCheckService::new());
+        let mock_repo = Arc::new(MockProcessRepositoryTrait::new());
+        let mock_runtime = Arc::new(MockProcessRuntimeTrait::new());
+        let mock_health = Arc::new(MockHealthCheckTrait::new());
         let monitoring_service = Arc::new(ProcessMonitoringService::new(mock_repo.clone()));
 
         // Create a real ProcessRepository with in-memory database for configuration manager
