@@ -115,6 +115,61 @@ The MCP server provides the following tools:
 
 ## Development
 
+### Development Workflow
+
+This project uses a **PR-based development workflow** with automated releases:
+
+#### Branch Protection
+- **Main branch is protected** - no direct pushes allowed
+- All changes must go through **Pull Requests**
+- **CI checks must pass** before merging
+- **At least one approval** required for PRs
+- **Linear git history** enforced (squash/rebase merging)
+
+#### Making Changes
+1. **Create a feature branch** from `main`:
+   ```bash
+   git checkout -b feat/your-feature-name
+   ```
+
+2. **Make your changes** following conventional commits:
+   ```bash
+   git commit -m "feat: add process health monitoring"
+   git commit -m "fix: resolve memory leak in process cleanup"
+   git commit -m "docs: update README with installation instructions"
+   ```
+
+3. **Push and create a PR**:
+   ```bash
+   git push origin feat/your-feature-name
+   # Then create PR via GitHub UI
+   ```
+
+4. **PR Review Process**:
+   - CI checks must pass (formatting, linting, tests)
+   - At least one approval required
+   - All conversations must be resolved
+   - Use "Squash and merge" to maintain linear history
+
+#### Conventional Commits
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated changelog generation:
+
+- `feat:` - New features
+- `fix:` - Bug fixes  
+- `docs:` - Documentation changes
+- `refactor:` - Code refactoring
+- `perf:` - Performance improvements
+- `test:` - Test additions/improvements
+- `ci:` - CI/CD changes
+- `chore:` - Maintenance tasks
+
+#### Automated Releases
+- **Release Please** automatically creates release PRs based on conventional commits
+- **Semantic versioning** is automatically determined from commit types
+- **CHANGELOG.md** is automatically updated
+- **GitHub releases** are created with binaries for multiple platforms
+- **Crates.io publishing** (when configured)
+
 ### Testing
 
 ```bash
@@ -126,6 +181,9 @@ cargo test --coverage
 
 # Run integration tests
 cargo test --test integration
+
+# Pre-commit checks (run before pushing)
+cargo fmt && cargo clippy -- -D warnings && cargo test
 ```
 
 ### Code Quality
@@ -135,6 +193,31 @@ The project follows these principles:
 - **File Size Limits**: Soft limit of 300 lines, hard limit of 500 lines per file
 - **Modular Design**: Clear separation of concerns
 - **Error Handling**: Comprehensive error types and handling
+- **Clippy Compliance**: All clippy warnings treated as errors
+- **Consistent Formatting**: Enforced via `cargo fmt`
+
+### Repository Setup
+
+#### Branch Protection Configuration
+To set up branch protection rules (requires admin access):
+
+1. Go to **Settings → Branches** in GitHub
+2. Add rule for `main` branch with these settings:
+   - ✅ Require pull request before merging (1 approval)
+   - ✅ Require status checks to pass before merging
+   - ✅ Require conversation resolution before merging
+   - ✅ Require linear history
+   - ✅ Do not allow bypassing the above settings
+
+See [`.github/BRANCH_PROTECTION.md`](.github/BRANCH_PROTECTION.md) for detailed configuration instructions.
+
+#### Required Status Checks
+The following CI checks must pass before merging:
+- `Check` - Code formatting and linting
+- `Test Suite (ubuntu-latest, stable)` - Linux tests
+- `Test Suite (windows-latest, stable)` - Windows tests  
+- `Test Suite (macos-latest, stable)` - macOS tests
+- `Documentation` - Documentation generation
 
 ## License
 
