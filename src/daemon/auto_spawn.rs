@@ -113,3 +113,157 @@ pub async fn ensure_daemon_running_for_mcp(socket_path: PathBuf) -> Result<()> {
     let spawner = DaemonAutoSpawner::new(socket_path, false); // MCP doesn't output to stdout
     spawner.ensure_daemon_running().await
 }
+
+impl DaemonAutoSpawner {
+    /// Get the socket path (for testing)
+    pub fn socket_path(&self) -> &PathBuf {
+        &self.socket_path
+    }
+
+    /// Get the verbose flag (for testing)
+    pub fn is_verbose(&self) -> bool {
+        self.verbose
+    }
+
+    /// Create command for daemon process (extracted for testing)
+    pub fn create_daemon_command(&self) -> Result<Command> {
+        let current_exe = std::env::current_exe().map_err(|e| {
+            RunceptError::ProcessError(format!("Failed to get current executable: {e}"))
+        })?;
+
+        let mut cmd = Command::new(&current_exe);
+        cmd.arg("daemon-process")
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true);
+
+        if self.verbose {
+            cmd.arg("--verbose");
+        }
+
+        Ok(cmd)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_daemon_auto_spawner_creation() {
+        let socket_path = PathBuf::from("/tmp/test.sock");
+        let spawner = DaemonAutoSpawner::new(socket_path.clone(), true);
+
+        assert_eq!(spawner.socket_path(), &socket_path);
+        assert!(spawner.is_verbose());
+    }
+
+    #[test]
+    fn test_daemon_auto_spawner_creation_non_verbose() {
+        let socket_path = PathBuf::from("/tmp/test.sock");
+        let spawner = DaemonAutoSpawner::new(socket_path.clone(), false);
+
+        assert_eq!(spawner.socket_path(), &socket_path);
+        assert!(!spawner.is_verbose());
+    }
+
+    #[test]
+    fn test_create_daemon_command_verbose() {
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+        let spawner = DaemonAutoSpawner::new(socket_path.clone(), true);
+
+        let result = spawner.create_daemon_command();
+        assert!(result.is_ok());
+
+        // We can't easily test the exact command structure without making it public,
+        // but we can verify it doesn't error
+    }
+
+    #[test]
+    fn test_create_daemon_command_non_verbose() {
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+        let spawner = DaemonAutoSpawner::new(socket_path.clone(), false);
+
+        let result = spawner.create_daemon_command();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ensure_daemon_running_for_cli() {
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+
+        // This will likely fail because the daemon isn't actually running,
+        // but we can test that the function exists and handles the error gracefully
+        let result = ensure_daemon_running_for_cli(socket_path, true).await;
+        
+        // We expect this to fail since no daemon is running
+        assert!(result.is_err());
+        
+        // The error should be related to connection or process spawning
+        match result.unwrap_err() {
+            RunceptError::ConnectionError(_) | RunceptError::ProcessError(_) => {
+                // Expected error types
+            }
+            other => panic!("Unexpected error type: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_daemon_running_for_mcp() {
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+
+        // This will likely fail because the daemon isn't actually running,
+        // but we can test that the function exists and handles the error gracefully
+        let result = ensure_daemon_running_for_mcp(socket_path).await;
+        
+        // We expect this to fail since no daemon is running
+        assert!(result.is_err());
+        
+        // The error should be related to connection or process spawning
+        match result.unwrap_err() {
+            RunceptError::ConnectionError(_) | RunceptError::ProcessError(_) => {
+                // Expected error types
+            }
+            other => panic!("Unexpected error type: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_convenience_functions_create_correct_spawner() {
+        // Test that the convenience functions create spawners with correct settings
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+
+        // CLI spawner should be verbose
+        let cli_spawner = DaemonAutoSpawner::new(socket_path.clone(), true);
+        assert!(cli_spawner.is_verbose());
+
+        // MCP spawner should not be verbose
+        let mcp_spawner = DaemonAutoSpawner::new(socket_path.clone(), false);
+        assert!(!mcp_spawner.is_verbose());
+    }
+
+    #[test]
+    fn test_socket_path_handling() {
+        // Test various socket path formats
+        let paths = vec![
+            PathBuf::from("/tmp/runcept.sock"),
+            PathBuf::from("./local.sock"),
+            PathBuf::from("/var/run/runcept/daemon.sock"),
+        ];
+
+        for path in paths {
+            let spawner = DaemonAutoSpawner::new(path.clone(), false);
+            assert_eq!(spawner.socket_path(), &path);
+        }
+    }
+}

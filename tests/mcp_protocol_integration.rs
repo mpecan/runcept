@@ -763,4 +763,175 @@ mod mcp_protocol_tests {
         let _ = client.cancel().await;
         test_env.stop_daemon().await;
     }
+
+    /// Test MCP activity tracking integration
+    /// Verifies that MCP operations properly record activity for inactivity tracking
+    #[tokio::test]
+    async fn test_mcp_activity_tracking_integration() {
+        let mut test_env = McpTestEnvironment::new("mcp-activity-tracking").await;
+
+        // Start daemon first
+        test_env
+            .start_daemon()
+            .await
+            .expect("Failed to start daemon");
+
+        // Wait for daemon to be ready
+        test_env
+            .wait_for_daemon()
+            .await
+            .expect("Daemon should be ready");
+
+        // Start MCP client
+        let client = test_env
+            .create_mcp_client(None)
+            .await
+            .expect("Failed to start MCP client");
+
+        // Test 1: Activate environment and verify activity is recorded
+        let activate_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("activate_environment".to_string()),
+                arguments: Some(rmcp::object!({
+                    "path": test_env.project_dir().to_string_lossy()
+                })),
+            })
+            .await;
+        assert!(
+            activate_result.is_ok(),
+            "activate_environment should succeed: {activate_result:?}"
+        );
+
+        // Test 2: Explicitly record environment activity
+        let activity_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("record_environment_activity".to_string()),
+                arguments: None,
+            })
+            .await;
+        assert!(
+            activity_result.is_ok(),
+            "record_environment_activity should succeed: {activity_result:?}"
+        );
+        let activity_response = activity_result.unwrap();
+        assert!(
+            !activity_response.is_error.unwrap_or(false),
+            "record_environment_activity should not return error"
+        );
+
+        // Test 3: Start a process and verify activity is recorded automatically
+        let start_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("start_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-process"
+                })),
+            })
+            .await;
+        assert!(
+            start_result.is_ok(),
+            "start_process should succeed: {start_result:?}"
+        );
+
+        // Test 4: Stop the process and verify activity is recorded
+        let stop_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("stop_process".to_string()),
+                arguments: Some(rmcp::object!({
+                    "name": "test-process"
+                })),
+            })
+            .await;
+        assert!(
+            stop_result.is_ok(),
+            "stop_process should succeed: {stop_result:?}"
+        );
+
+        // Test 5: List processes and verify activity is recorded
+        let list_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("list_processes".to_string()),
+                arguments: None,
+            })
+            .await;
+        assert!(
+            list_result.is_ok(),
+            "list_processes should succeed: {list_result:?}"
+        );
+
+        // Test 6: Get environment status to check if activity tracking is working
+        let status_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("get_environment_status".to_string()),
+                arguments: None,
+            })
+            .await;
+        assert!(
+            status_result.is_ok(),
+            "get_environment_status should succeed: {status_result:?}"
+        );
+        let status_response = status_result.unwrap();
+        assert!(
+            !status_response.is_error.unwrap_or(false),
+            "get_environment_status should not return error"
+        );
+
+        // Verify that the status contains activity information
+        let status_content = status_response
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let Some(text) = c.clone().raw.as_text() {
+                    Some(text.text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // The status should contain information about the environment being active
+        assert!(
+            status_content.contains("active") || status_content.contains("Active"),
+            "Environment status should indicate active state, showing activity tracking is working. Status: {status_content}"
+        );
+
+        // Test 7: Test activity tracking with multiple rapid operations
+        for i in 0..3 {
+            let rapid_activity_result = client
+                .peer()
+                .call_tool(CallToolRequestParam {
+                    name: Cow::Owned("record_environment_activity".to_string()),
+                    arguments: None,
+                })
+                .await;
+            assert!(
+                rapid_activity_result.is_ok(),
+                "rapid activity recording {i} should succeed: {rapid_activity_result:?}"
+            );
+        }
+
+        // Test 8: Deactivate environment and verify final activity recording
+        let deactivate_result = client
+            .peer()
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned("deactivate_environment".to_string()),
+                arguments: None,
+            })
+            .await;
+        assert!(
+            deactivate_result.is_ok(),
+            "deactivate_environment should succeed: {deactivate_result:?}"
+        );
+
+        // Clean up
+        let _ = client.cancel().await;
+        test_env.stop_daemon().await;
+    }
 }

@@ -48,28 +48,14 @@ impl DaemonHandles {
         let env_manager = self.environment_manager.read().await;
 
         let uptime = self.start_time.elapsed().unwrap_or(Duration::from_secs(0));
-        let uptime_str = format!(
-            "{}d {}h {}m {}s",
-            uptime.as_secs() / 86400,
-            (uptime.as_secs() % 86400) / 3600,
-            (uptime.as_secs() % 3600) / 60,
-            uptime.as_secs() % 60
-        );
+        let uptime_str = Self::format_uptime(uptime);
 
         // Count active environments using the environment manager
         let active_environments = env_manager.get_active_environments();
         let environment_count = active_environments.len();
 
         // Count total processes across all active environments
-        let mut total_processes = 0;
-        for (env_id, _) in &active_environments {
-            if let Ok(processes) = orchestration_service
-                .list_processes_for_environment(env_id)
-                .await
-            {
-                total_processes += processes.len();
-            }
-        }
+        let total_processes = self.count_total_processes(&orchestration_service, &active_environments).await;
 
         let status = DaemonStatusResponse {
             running: true,
@@ -82,6 +68,35 @@ impl DaemonHandles {
         };
 
         Ok(DaemonResponse::DaemonStatus(status))
+    }
+
+    /// Format uptime duration into a human-readable string
+    pub fn format_uptime(uptime: Duration) -> String {
+        format!(
+            "{}d {}h {}m {}s",
+            uptime.as_secs() / 86400,
+            (uptime.as_secs() % 86400) / 3600,
+            (uptime.as_secs() % 3600) / 60,
+            uptime.as_secs() % 60
+        )
+    }
+
+    /// Count total processes across all active environments
+    async fn count_total_processes(
+        &self,
+        orchestration_service: &DefaultProcessOrchestrationService,
+        active_environments: &Vec<(&String, &crate::config::Environment)>,
+    ) -> usize {
+        let mut total_processes = 0;
+        for (env_id, _) in active_environments {
+            if let Ok(processes) = orchestration_service
+                .list_processes_for_environment(env_id)
+                .await
+            {
+                total_processes += processes.len();
+            }
+        }
+        total_processes
     }
 
     /// Record environment activity for inactivity tracking
@@ -112,4 +127,73 @@ impl DaemonHandles {
             message: "Shutdown initiated".to_string(),
         })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_format_uptime_seconds() {
+        let uptime = Duration::from_secs(45);
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "0d 0h 0m 45s");
+    }
+
+    #[test]
+    fn test_format_uptime_minutes() {
+        let uptime = Duration::from_secs(125); // 2m 5s
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "0d 0h 2m 5s");
+    }
+
+    #[test]
+    fn test_format_uptime_hours() {
+        let uptime = Duration::from_secs(3665); // 1h 1m 5s
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "0d 1h 1m 5s");
+    }
+
+    #[test]
+    fn test_format_uptime_days() {
+        let uptime = Duration::from_secs(90061); // 1d 1h 1m 1s
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "1d 1h 1m 1s");
+    }
+
+    #[test]
+    fn test_format_uptime_complex() {
+        let uptime = Duration::from_secs(266645); // 3d 2h 4m 5s
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "3d 2h 4m 5s");
+    }
+
+    #[test]
+    fn test_format_uptime_zero() {
+        let uptime = Duration::from_secs(0);
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "0d 0h 0m 0s");
+    }
+
+    #[test]
+    fn test_format_uptime_edge_cases() {
+        // Exactly 1 minute
+        let uptime = Duration::from_secs(60);
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "0d 0h 1m 0s");
+
+        // Exactly 1 hour
+        let uptime = Duration::from_secs(3600);
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "0d 1h 0m 0s");
+
+        // Exactly 1 day
+        let uptime = Duration::from_secs(86400);
+        let formatted = DaemonHandles::format_uptime(uptime);
+        assert_eq!(formatted, "1d 0h 0m 0s");
+    }
+
+    // Note: Integration tests with full daemon setup are complex due to dependencies.
+    // These tests focus on the pure functions and simple logic that can be tested in isolation.
 }

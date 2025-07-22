@@ -347,4 +347,90 @@ impl ProcessHandles {
             }
         }
     }
+
+    /// Helper method to validate environment exists and is active
+    pub async fn validate_environment_exists(&self, env_id: &str) -> Result<()> {
+        let orchestration_service = self.orchestration_service.read().await;
+        if let Some(env_manager) = &orchestration_service.environment_manager {
+            let env_manager_guard = env_manager.read().await;
+            let env = env_manager_guard.get_environment(env_id).ok_or_else(|| {
+                RunceptError::EnvironmentError(format!(
+                    "Environment '{env_id}' not found or not activated"
+                ))
+            })?;
+
+            if !env.is_active() {
+                return Err(RunceptError::EnvironmentError(format!(
+                    "Environment '{env_id}' is registered but not active"
+                )));
+            }
+        } else {
+            return Err(RunceptError::EnvironmentError(
+                "Environment manager not initialized".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+
+    // Note: These tests require proper dependency injection and mocking to be testable.
+    // The current architecture is too tightly coupled for effective unit testing.
+    // Future refactoring should introduce traits for dependencies to enable proper mocking.
+
+    #[test]
+    fn test_process_definition_creation() {
+        // Test creating a ProcessDefinition for testing
+        let process_def = ProcessDefinition {
+            name: "test-process".to_string(),
+            command: "echo hello".to_string(),
+            working_dir: None,
+            auto_restart: None,
+            health_check_url: None,
+            health_check_interval: None,
+            depends_on: vec![],
+            env_vars: std::collections::HashMap::new(),
+        };
+        
+        assert_eq!(process_def.name, "test-process");
+        assert_eq!(process_def.command, "echo hello");
+        assert!(process_def.working_dir.is_none());
+        assert!(process_def.auto_restart.is_none());
+        assert!(process_def.depends_on.is_empty());
+        assert!(process_def.env_vars.is_empty());
+    }
+
+    #[test]
+    fn test_process_definition_with_dependencies() {
+        let mut env_vars = std::collections::HashMap::new();
+        env_vars.insert("TEST_VAR".to_string(), "test_value".to_string());
+        
+        let process_def = ProcessDefinition {
+            name: "complex-process".to_string(),
+            command: "npm start".to_string(),
+            working_dir: Some("./app".to_string()),
+            auto_restart: Some(true),
+            health_check_url: Some("http://localhost:3000/health".to_string()),
+            health_check_interval: Some(30),
+            depends_on: vec!["database".to_string(), "redis".to_string()],
+            env_vars,
+        };
+        
+        assert_eq!(process_def.name, "complex-process");
+        assert_eq!(process_def.command, "npm start");
+        assert_eq!(process_def.working_dir, Some("./app".to_string()));
+        assert_eq!(process_def.auto_restart, Some(true));
+        assert_eq!(process_def.health_check_url, Some("http://localhost:3000/health".to_string()));
+        assert_eq!(process_def.health_check_interval, Some(30));
+        assert_eq!(process_def.depends_on, vec!["database", "redis"]);
+        assert_eq!(process_def.env_vars.get("TEST_VAR"), Some(&"test_value".to_string()));
+    }
+
+    // Note: Full integration tests with real orchestration service would require
+    // complex setup and are better suited for integration test files.
+    // These unit tests focus on the logic that can be tested in isolation.
 }
