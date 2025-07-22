@@ -2,7 +2,6 @@
 mod tests {
     use super::*;
     use crate::database::Database;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_query_manager_creation() {
@@ -51,10 +50,8 @@ mod tests {
 
         assert!(info.contains_key("processes"));
         assert!(info.contains_key("environments"));
-        assert!(info.contains_key("activity_logs"));
         assert_eq!(info["processes"], 0);
         assert_eq!(info["environments"], 0);
-        assert_eq!(info["activity_logs"], 0);
     }
 
     #[tokio::test]
@@ -64,79 +61,10 @@ mod tests {
 
         let manager = QueryManager::new(db.get_pool());
 
-        // Insert test environment and process first
-        let env_id = Uuid::new_v4().to_string();
-        let process_id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now();
-
-        // Insert test environment
-        sqlx::query(
-            "INSERT INTO environments (id, name, project_path, config_path, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(&env_id)
-        .bind("test_env")
-        .bind("/tmp/test")
-        .bind("/tmp/test/.runit.toml")
-        .bind("active")
-        .bind(now)
-        .bind(now)
-        .execute(db.get_pool())
-        .await
-        .unwrap();
-
-        // Insert test process
-        sqlx::query(
-            "INSERT INTO processes (id, name, command, working_dir, environment_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(&process_id)
-        .bind("test_process")
-        .bind("echo test")
-        .bind("/tmp")
-        .bind(&env_id)
-        .bind("running")
-        .bind(now)
-        .bind(now)
-        .execute(db.get_pool())
-        .await
-        .unwrap();
-
-        // Insert old log (more than 7 days ago)
-        let old_timestamp = chrono::Utc::now() - chrono::Duration::days(8);
-        sqlx::query(
-            "INSERT INTO activity_logs (process_id, environment_id, activity_type, timestamp) VALUES (?, ?, ?, ?)"
-        )
-        .bind(&process_id)
-        .bind(&env_id)
-        .bind("test_activity")
-        .bind(old_timestamp)
-        .execute(db.get_pool())
-        .await
-        .unwrap();
-
-        // Insert recent log
-        let recent_timestamp = chrono::Utc::now() - chrono::Duration::days(1);
-        sqlx::query(
-            "INSERT INTO activity_logs (process_id, environment_id, activity_type, timestamp) VALUES (?, ?, ?, ?)"
-        )
-        .bind(&process_id)
-        .bind(&env_id)
-        .bind("test_activity")
-        .bind(recent_timestamp)
-        .execute(db.get_pool())
-        .await
-        .unwrap();
-
-        // Verify we have 2 logs
-        let count = manager.count_records("activity_logs").await.unwrap();
-        assert_eq!(count, 2);
-
-        // Clean up old logs
+        // After migration 002, activity_logs table shouldn't exist
+        // The cleanup method should handle this gracefully and return 0
         let deleted = manager.cleanup_old_activity_logs(7).await.unwrap();
-        assert_eq!(deleted, 1);
-
-        // Verify only 1 log remains
-        let count = manager.count_records("activity_logs").await.unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(deleted, 0); // No table, no rows deleted
     }
 
     #[tokio::test]
@@ -186,7 +114,7 @@ impl<'a> QueryManager<'a> {
     pub async fn get_database_info(&self) -> Result<HashMap<String, i64>> {
         let mut info = HashMap::new();
 
-        let tables = vec!["processes", "environments", "activity_logs"];
+        let tables = vec!["processes", "environments"];
 
         for table in tables {
             let count = self.count_records(table).await?;
@@ -198,6 +126,18 @@ impl<'a> QueryManager<'a> {
 
     pub async fn cleanup_old_activity_logs(&self, days_to_keep: i64) -> Result<u64> {
         let cutoff_date = chrono::Utc::now() - chrono::Duration::days(days_to_keep);
+
+        // Check if the activity_logs table exists (it may have been removed in migration 002)
+        let table_exists = sqlx::query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='activity_logs'"
+        )
+        .fetch_optional(self.pool)
+        .await?;
+
+        if table_exists.is_none() {
+            // Table doesn't exist, return 0 rows affected
+            return Ok(0);
+        }
 
         let result = sqlx::query("DELETE FROM activity_logs WHERE timestamp < ?")
             .bind(cutoff_date)

@@ -225,3 +225,345 @@ impl DefaultProcessExecutionService {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::process_repository::ProcessRecord;
+    use crate::error::Result;
+    use crate::process::{HealthCheckConfig, HealthCheckResult, HealthCheckType, ProcessHandle};
+    use async_trait::async_trait;
+    use chrono::Utc;
+    use std::collections::HashMap;
+    use std::sync::Mutex as StdMutex;
+    use tempfile::TempDir;
+
+    // Mock repository implementation
+    #[derive(Debug)]
+    struct MockProcessRepository {
+        processes: StdMutex<HashMap<String, ProcessRecord>>,
+    }
+
+    impl MockProcessRepository {
+        fn new() -> Self {
+            Self {
+                processes: StdMutex::new(HashMap::new()),
+            }
+        }
+
+        fn add_process(&self, process: ProcessRecord) {
+            let key = format!("{}:{}", process.environment_id, process.name);
+            self.processes.lock().unwrap().insert(key, process);
+        }
+    }
+
+    #[async_trait]
+    impl ProcessRepositoryTrait for MockProcessRepository {
+        async fn insert_process(&self, _process: &crate::process::Process) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_process_by_name(&self, environment_id: &str, name: &str) -> Result<Option<ProcessRecord>> {
+            let key = format!("{environment_id}:{name}");
+            Ok(self.processes.lock().unwrap().get(&key).cloned())
+        }
+
+        async fn get_process_by_name_validated(&self, environment_id: &str, name: &str) -> Result<Option<ProcessRecord>> {
+            self.get_process_by_name(environment_id, name).await
+        }
+
+        async fn delete_process(&self, _environment_id: &str, _name: &str) -> Result<bool> {
+            Ok(true)
+        }
+
+        async fn update_process_status(&self, _environment_id: &str, _name: &str, _status: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_running_processes(&self) -> Result<Vec<(String, String, Option<i64>)>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_processes_by_status(&self, _status: &str) -> Result<Vec<ProcessRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn set_process_pid(&self, _environment_id: &str, _name: &str, _pid: i64) -> Result<()> {
+            Ok(())
+        }
+
+        async fn clear_process_pid(&self, _environment_id: &str, _name: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_processes_by_environment(&self, environment_id: &str) -> Result<Vec<ProcessRecord>> {
+            Ok(self.processes.lock().unwrap().values()
+                .filter(|p| p.environment_id == environment_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn validate_environment(&self, _environment_id: &str) -> Result<bool> {
+            Ok(true)
+        }
+
+        async fn cleanup_processes_by_environment(&self, _environment_id: &str) -> Result<u64> {
+            Ok(0)
+        }
+
+        async fn update_process_command(&self, _environment_id: &str, _name: &str, _command: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn update_process_working_dir(&self, _environment_id: &str, _name: &str, _working_dir: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn update_process_activity(&self, _environment_id: &str, _name: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn count_processes_by_environment(&self, _environment_id: &str) -> Result<i64> {
+            Ok(0)
+        }
+
+        async fn count_processes_by_status(&self, _status: &str) -> Result<i64> {
+            Ok(0)
+        }
+    }
+
+    // Mock runtime implementation
+    struct MockProcessRuntime;
+
+    #[async_trait]
+    impl ProcessRuntimeTrait for MockProcessRuntime {
+        async fn spawn_process(&self, _process: &crate::process::Process) -> Result<ProcessHandle> {
+            let child = tokio::process::Command::new("echo")
+                .arg("test")
+                .spawn()
+                .map_err(|e| crate::error::RunceptError::ProcessError(format!("Failed to spawn mock process: {}", e)))?;
+
+            Ok(ProcessHandle {
+                child,
+                logger: None,
+                shutdown_tx: None,
+            })
+        }
+    }
+
+    // Mock health check implementation
+    struct MockHealthCheckService;
+
+    #[async_trait]
+    impl HealthCheckTrait for MockHealthCheckService {
+        async fn execute_health_check(&self, _check: &HealthCheckConfig) -> Result<HealthCheckResult> {
+            Ok(HealthCheckResult {
+                check_type: HealthCheckType::Http {
+                    url: "http://localhost:8080".to_string(),
+                    expected_status: 200,
+                },
+                success: true,
+                message: "Mock health check passed".to_string(),
+                duration_ms: 10,
+                timestamp: Utc::now(),
+            })
+        }
+
+        async fn execute_health_checks(&self, checks: &[HealthCheckConfig]) -> Result<Vec<HealthCheckResult>> {
+            let mut results = Vec::new();
+            for check in checks {
+                results.push(self.execute_health_check(check).await?);
+            }
+            Ok(results)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execution_service_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let global_config = crate::config::GlobalConfig::default();
+        let mock_repo = Arc::new(MockProcessRepository::new());
+        let mock_runtime = Arc::new(MockProcessRuntime);
+        let mock_health = Arc::new(MockHealthCheckService);
+
+        // Create a real ProcessRepository with in-memory database for configuration manager
+        let temp_db = crate::database::Database::new("sqlite::memory:")
+            .await
+            .unwrap();
+        temp_db.init().await.unwrap();
+        let real_repo = Arc::new(crate::database::ProcessRepository::new(
+            Arc::new(temp_db.get_pool().clone())
+        ));
+
+        let config_manager = Arc::new(RwLock::new(ProcessConfigurationManager::new(
+            global_config.clone(),
+            Arc::new(RwLock::new(
+                crate::config::EnvironmentManager::new(global_config.clone())
+                    .await
+                    .unwrap(),
+            )),
+            real_repo,
+        )));
+
+        let service = ProcessExecutionService::new(
+            config_manager,
+            global_config,
+            mock_repo,
+            mock_runtime,
+            mock_health,
+        );
+
+        // Should have created the lifecycle and monitoring services
+        assert!(service.lifecycle_manager.read().await.process_handles.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_running_processes_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let global_config = crate::config::GlobalConfig::default();
+        let mock_repo = Arc::new(MockProcessRepository::new());
+        let mock_runtime = Arc::new(MockProcessRuntime);
+        let mock_health = Arc::new(MockHealthCheckService);
+
+        // Create a real ProcessRepository with in-memory database for configuration manager
+        let temp_db = crate::database::Database::new("sqlite::memory:")
+            .await
+            .unwrap();
+        temp_db.init().await.unwrap();
+        let real_repo = Arc::new(crate::database::ProcessRepository::new(
+            Arc::new(temp_db.get_pool().clone())
+        ));
+
+        let config_manager = Arc::new(RwLock::new(ProcessConfigurationManager::new(
+            global_config.clone(),
+            Arc::new(RwLock::new(
+                crate::config::EnvironmentManager::new(global_config.clone())
+                    .await
+                    .unwrap(),
+            )),
+            real_repo,
+        )));
+
+        let service = ProcessExecutionService::new(
+            config_manager,
+            global_config,
+            mock_repo,
+            mock_runtime,
+            mock_health,
+        );
+
+        let processes = service.list_running_processes("test-env").await;
+        assert!(processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_running_processes_with_data() {
+        let temp_dir = TempDir::new().unwrap();
+        let global_config = crate::config::GlobalConfig::default();
+        let mock_repo = Arc::new(MockProcessRepository::new());
+        let mock_runtime = Arc::new(MockProcessRuntime);
+        let mock_health = Arc::new(MockHealthCheckService);
+
+        // Add a test process
+        mock_repo.add_process(ProcessRecord {
+            id: "test-env:test-process".to_string(),
+            name: "test-process".to_string(),
+            command: "echo hello".to_string(),
+            working_dir: "/tmp".to_string(),
+            environment_id: "test-env".to_string(),
+            status: "running".to_string(),
+            pid: Some(1234),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        });
+
+        // Create a real ProcessRepository with in-memory database for configuration manager
+        let temp_db = crate::database::Database::new("sqlite::memory:")
+            .await
+            .unwrap();
+        temp_db.init().await.unwrap();
+        let real_repo = Arc::new(crate::database::ProcessRepository::new(
+            Arc::new(temp_db.get_pool().clone())
+        ));
+
+        let config_manager = Arc::new(RwLock::new(ProcessConfigurationManager::new(
+            global_config.clone(),
+            Arc::new(RwLock::new(
+                crate::config::EnvironmentManager::new(global_config.clone())
+                    .await
+                    .unwrap(),
+            )),
+            real_repo,
+        )));
+
+        let service = ProcessExecutionService::new(
+            config_manager,
+            global_config,
+            mock_repo,
+            mock_runtime,
+            mock_health,
+        );
+
+        let processes = service.list_running_processes("test-env").await;
+        assert_eq!(processes.len(), 1);
+        assert_eq!(processes[0].name, "test-process");
+        assert_eq!(processes[0].status, "running");
+    }
+
+    #[tokio::test]
+    async fn test_get_process_status() {
+        let temp_dir = TempDir::new().unwrap();
+        let global_config = crate::config::GlobalConfig::default();
+        let mock_repo = Arc::new(MockProcessRepository::new());
+        let mock_runtime = Arc::new(MockProcessRuntime);
+        let mock_health = Arc::new(MockHealthCheckService);
+
+        // Add a test process
+        mock_repo.add_process(ProcessRecord {
+            id: "test-env:test-process".to_string(),
+            name: "test-process".to_string(),
+            command: "echo hello".to_string(),
+            working_dir: "/tmp".to_string(),
+            environment_id: "test-env".to_string(),
+            status: "running".to_string(),
+            pid: Some(1234),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        });
+
+        // Create a real ProcessRepository with in-memory database for configuration manager
+        let temp_db = crate::database::Database::new("sqlite::memory:")
+            .await
+            .unwrap();
+        temp_db.init().await.unwrap();
+        let real_repo = Arc::new(crate::database::ProcessRepository::new(
+            Arc::new(temp_db.get_pool().clone())
+        ));
+
+        let config_manager = Arc::new(RwLock::new(ProcessConfigurationManager::new(
+            global_config.clone(),
+            Arc::new(RwLock::new(
+                crate::config::EnvironmentManager::new(global_config.clone())
+                    .await
+                    .unwrap(),
+            )),
+            real_repo,
+        )));
+
+        let service = ProcessExecutionService::new(
+            config_manager,
+            global_config,
+            mock_repo,
+            mock_runtime,
+            mock_health,
+        );
+
+        let status = service.get_process_status("test-process", "test-env").await;
+        assert!(status.is_some());
+        assert!(matches!(status.unwrap(), crate::process::ProcessStatus::Running));
+
+        // Test nonexistent process
+        let status = service.get_process_status("nonexistent", "test-env").await;
+        assert!(status.is_none());
+    }
+}

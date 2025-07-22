@@ -10,7 +10,6 @@ mod tests {
 
         assert_eq!(config.database.connection_timeout, 30);
         assert_eq!(config.database.cleanup_interval_hours, 24);
-        assert_eq!(config.database.activity_log_retention_days, 30);
         assert_eq!(config.process.default_inactivity_timeout, "30m");
         assert_eq!(config.process.health_check_interval, 30);
         assert_eq!(config.process.restart_delay, 5);
@@ -194,8 +193,6 @@ pub struct DatabaseConfig {
     pub connection_timeout: u32,
     #[serde(default = "default_cleanup_interval_hours")]
     pub cleanup_interval_hours: u32,
-    #[serde(default = "default_activity_log_retention_days")]
-    pub activity_log_retention_days: u32,
     pub database_path: Option<String>, // If None, uses default ~/.runcept/runcept.db
 }
 
@@ -264,7 +261,6 @@ impl Default for DatabaseConfig {
         Self {
             connection_timeout: default_connection_timeout(),
             cleanup_interval_hours: default_cleanup_interval_hours(),
-            activity_log_retention_days: default_activity_log_retention_days(),
             database_path: None,
         }
     }
@@ -464,9 +460,6 @@ fn default_connection_timeout() -> u32 {
 }
 fn default_cleanup_interval_hours() -> u32 {
     24
-}
-fn default_activity_log_retention_days() -> u32 {
-    30
 }
 fn default_inactivity_timeout() -> String {
     "30m".to_string()

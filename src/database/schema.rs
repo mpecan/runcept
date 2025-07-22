@@ -57,10 +57,6 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        let result = sqlx::query("SELECT COUNT(*) FROM activity_logs")
-            .fetch_one(&db.pool)
-            .await;
-        assert!(result.is_ok());
     }
 
     #[tokio::test]

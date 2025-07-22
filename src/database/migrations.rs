@@ -101,7 +101,7 @@ impl<'a> MigrationManager<'a> {
 
     pub async fn validate_schema(&self) -> Result<bool> {
         // Check if all required tables exist
-        let required_tables = vec!["environments", "processes", "activity_logs"];
+        let required_tables = vec!["environments", "processes"];
 
         for table in required_tables {
             let result =
@@ -120,7 +120,6 @@ impl<'a> MigrationManager<'a> {
             "idx_processes_environment",
             "idx_processes_status",
             "idx_environments_status",
-            "idx_activity_logs_timestamp",
         ];
 
         for index in required_indexes {
@@ -140,9 +139,6 @@ impl<'a> MigrationManager<'a> {
 
     pub async fn reset_database(&self) -> Result<()> {
         // Drop all tables in reverse order to handle foreign key constraints
-        sqlx::query("DROP TABLE IF EXISTS activity_logs")
-            .execute(self.pool)
-            .await?;
         sqlx::query("DROP TABLE IF EXISTS processes")
             .execute(self.pool)
             .await?;
