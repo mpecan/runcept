@@ -396,6 +396,75 @@ Windows support is currently incomplete due to platform-specific dependencies:
 
 ## Development
 
+### Development Workflow
+
+This project uses a **PR-based development workflow** with automated releases:
+
+#### Branch Protection
+- **Main branch is protected** - no direct pushes allowed
+- All changes must go through **Pull Requests**
+- **CI checks must pass** before merging
+- **At least one approval** required for PRs
+- **Linear git history** enforced (squash/rebase merging)
+
+#### Making Changes
+1. **Create a feature branch** from `main`:
+   ```bash
+   git checkout -b feat/your-feature-name
+   ```
+
+2. **Make your changes** following conventional commits:
+   ```bash
+   git commit -m "feat: add process health monitoring"
+   git commit -m "fix: resolve memory leak in process cleanup"
+   git commit -m "docs: update README with installation instructions"
+   ```
+
+3. **Push your branch** and create a Pull Request:
+   ```bash
+   git push -u origin feat/your-feature-name
+   ```
+
+4. **Address review feedback** and ensure CI passes
+
+5. **Merge via GitHub** once approved (squash merge preferred)
+
+#### Automated Releases
+- **Release Please** automatically creates release PRs based on conventional commits
+- **Semantic versioning** is automatically determined from commit messages
+- **CHANGELOG.md** is automatically updated
+- **GitHub releases** are created automatically when release PRs are merged
+
+#### Commit Message Format
+Use [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Types:**
+- `feat:` - New features
+- `fix:` - Bug fixes  
+- `docs:` - Documentation changes
+- `style:` - Code style changes (formatting, etc.)
+- `refactor:` - Code refactoring
+- `test:` - Adding or updating tests
+- `chore:` - Maintenance tasks
+
+**Examples:**
+```bash
+feat: add process dependency resolution
+fix: resolve daemon connection timeout issue
+docs: update installation guide for Windows
+refactor: simplify process lifecycle management
+test: add integration tests for MCP server
+chore: update dependencies to latest versions
+```
+
 ### Building from Source
 
 ```bash
@@ -419,6 +488,9 @@ cargo test --test integration
 # Check code quality
 cargo clippy -- -D warnings
 cargo fmt --check
+
+# Pre-commit checks (run before pushing)
+cargo fmt && cargo clippy -- -D warnings && cargo test
 ```
 
 ### Contributing
@@ -428,6 +500,12 @@ cargo fmt --check
 3. Make your changes with tests
 4. Ensure all tests pass and code is formatted
 5. Submit a pull request
+
+The project follows these principles:
+- **TDD**: Test-driven development with high code coverage
+- **File Size Limits**: Soft limit of 300 lines, hard limit of 500 lines per file
+- **Modular Design**: Clear separation of concerns
+- **Error Handling**: Comprehensive error types and handling
 
 See [CLAUDE.md](CLAUDE.md) for detailed development guidelines.
 
