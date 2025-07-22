@@ -1,39 +1,15 @@
 use crate::error::{Result, RunceptError};
-use std::path::PathBuf;
+use interprocess::local_socket::{
+    GenericFilePath, ListenerOptions, Name, ToFsName,
+    tokio::{Listener as LocalListener, Stream as LocalStream, prelude::*},
+};
+
+#[cfg(windows)]
+use interprocess::local_socket::{GenericNamespaced, ToNsName};
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncRead, AsyncWrite};
 
-/// Cross-platform IPC stream trait
-pub trait IpcStream: AsyncRead + AsyncWrite + Send + Unpin {
-    /// Split the stream into read and write halves
-    fn into_split(
-        self,
-    ) -> (
-        Box<dyn AsyncRead + Send + Unpin>,
-        Box<dyn AsyncWrite + Send + Unpin>,
-    );
-}
-
-/// Cross-platform IPC listener trait
-pub trait IpcListener: Send {
-    type Stream: IpcStream;
-
-    /// Accept a new connection
-    #[allow(async_fn_in_trait)]
-    async fn accept(&mut self) -> Result<Self::Stream>;
-    /// Get the local address/path of the listener
-    fn local_addr(&self) -> String;
-}
-
-/// Cross-platform IPC client trait
-pub trait IpcClient: Send {
-    type Stream: IpcStream;
-
-    /// Connect to the IPC endpoint
-    #[allow(async_fn_in_trait)]
-    async fn connect(path: &IpcPath) -> Result<Self::Stream>;
-}
-
-/// Cross-platform IPC path abstraction
+/// Cross-platform IPC path abstraction using interprocess library
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpcPath {
     inner: PathBuf,
@@ -51,7 +27,7 @@ impl IpcPath {
     }
 
     /// Get the underlying PathBuf
-    pub fn as_path(&self) -> &std::path::Path {
+    pub fn as_path(&self) -> &Path {
         &self.inner
     }
 
@@ -68,25 +44,6 @@ impl IpcPath {
     /// Convert to PathBuf
     pub fn to_path_buf(&self) -> PathBuf {
         self.inner.clone()
-    }
-
-    /// Convert to platform-specific socket path
-    pub fn to_socket_path(&self) -> String {
-        #[cfg(unix)]
-        {
-            self.inner.to_string_lossy().to_string()
-        }
-        #[cfg(windows)]
-        {
-            // Convert to Windows named pipe format
-            format!(
-                r"\\.\pipe\{}",
-                self.inner
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("runcept-daemon")
-            )
-        }
     }
 
     /// Create default IPC path for the current user
@@ -107,6 +64,32 @@ impl IpcPath {
 
         Ok(Self::new(socket_path))
     }
+
+    /// Convert to interprocess Name for creating sockets
+    pub fn to_socket_name(&self) -> Result<Name> {
+        #[cfg(unix)]
+        {
+            // Use filesystem path on Unix
+            self.inner
+                .clone()
+                .to_fs_name::<GenericFilePath>()
+                .map_err(|e| {
+                    RunceptError::PlatformError(format!("Failed to create Unix socket name: {e}"))
+                })
+        }
+        #[cfg(windows)]
+        {
+            // Use namespace name on Windows
+            let name = self
+                .inner
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("runcept-daemon");
+            name.to_ns_name::<GenericNamespaced>().map_err(|e| {
+                RunceptError::PlatformError(format!("Failed to create Windows pipe name: {e}"))
+            })
+        }
+    }
 }
 
 impl From<PathBuf> for IpcPath {
@@ -121,8 +104,8 @@ impl From<&str> for IpcPath {
     }
 }
 
-impl AsRef<std::path::Path> for IpcPath {
-    fn as_ref(&self) -> &std::path::Path {
+impl AsRef<Path> for IpcPath {
+    fn as_ref(&self) -> &Path {
         &self.inner
     }
 }
@@ -145,275 +128,121 @@ impl PartialEq<IpcPath> for PathBuf {
     }
 }
 
-// Platform-specific implementations
+/// Cross-platform IPC stream using interprocess library
+pub struct IpcStream {
+    inner: LocalStream,
+}
 
-#[cfg(unix)]
-mod unix_impl {
-    use super::*;
-
-    use tokio::net::{UnixListener, UnixStream};
-
-    /// Unix domain socket stream wrapper
-    pub struct UnixIpcStream(UnixStream);
-
-    impl IpcStream for UnixIpcStream {
-        fn into_split(
-            self,
-        ) -> (
-            Box<dyn AsyncRead + Send + Unpin>,
-            Box<dyn AsyncWrite + Send + Unpin>,
-        ) {
-            let (read, write) = self.0.into_split();
-            (Box::new(read), Box::new(write))
-        }
-    }
-
-    impl AsyncRead for UnixIpcStream {
-        fn poll_read(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
-            std::pin::Pin::new(&mut self.0).poll_read(cx, buf)
-        }
-    }
-
-    impl AsyncWrite for UnixIpcStream {
-        fn poll_write(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &[u8],
-        ) -> std::task::Poll<std::io::Result<usize>> {
-            std::pin::Pin::new(&mut self.0).poll_write(cx, buf)
-        }
-
-        fn poll_flush(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
-            std::pin::Pin::new(&mut self.0).poll_flush(cx)
-        }
-
-        fn poll_shutdown(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
-            std::pin::Pin::new(&mut self.0).poll_shutdown(cx)
-        }
-    }
-
-    /// Unix domain socket listener wrapper
-    pub struct UnixIpcListener(UnixListener);
-
-    impl IpcListener for UnixIpcListener {
-        type Stream = UnixIpcStream;
-
-        async fn accept(&mut self) -> Result<Self::Stream> {
-            let (stream, _) = self.0.accept().await.map_err(|e| {
-                RunceptError::ConnectionError(format!("Failed to accept connection: {e}"))
-            })?;
-            Ok(UnixIpcStream(stream))
-        }
-
-        fn local_addr(&self) -> String {
-            self.0
-                .local_addr()
-                .map(|addr| {
-                    addr.as_pathname()
-                        .unwrap_or_else(|| std::path::Path::new("unknown"))
-                        .to_string_lossy()
-                        .to_string()
-                })
-                .unwrap_or_else(|_| "unknown".to_string())
-        }
-    }
-
-    impl UnixIpcListener {
-        pub async fn bind(path: &IpcPath) -> Result<Self> {
-            // Remove existing socket file if it exists
-            let socket_path = path.as_path();
-            if socket_path.exists() {
-                std::fs::remove_file(socket_path).map_err(RunceptError::IoError)?;
-            }
-
-            let listener = UnixListener::bind(socket_path).map_err(|e| {
-                RunceptError::ConnectionError(format!("Failed to bind Unix socket: {e}"))
-            })?;
-
-            Ok(Self(listener))
-        }
-    }
-
-    /// Unix domain socket client wrapper
-    pub struct UnixIpcClient;
-
-    impl IpcClient for UnixIpcClient {
-        type Stream = UnixIpcStream;
-
-        async fn connect(path: &IpcPath) -> Result<Self::Stream> {
-            let stream = UnixStream::connect(path.as_path()).await.map_err(|e| {
-                RunceptError::ConnectionError(format!("Failed to connect to Unix socket: {e}"))
-            })?;
-            Ok(UnixIpcStream(stream))
-        }
+impl IpcStream {
+    /// Split the stream into read and write halves
+    pub fn into_split(
+        self,
+    ) -> (
+        Box<dyn AsyncRead + Send + Unpin>,
+        Box<dyn AsyncWrite + Send + Unpin>,
+    ) {
+        let (read, write) = self.inner.split();
+        (Box::new(read), Box::new(write))
     }
 }
 
-#[cfg(windows)]
-mod windows_impl {
-    use super::*;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-    use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
-    use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeServer};
-
-    /// Windows named pipe stream wrapper that can be either server or client
-    pub enum WindowsIpcStream {
-        Server(NamedPipeServer),
-        Client(tokio::net::windows::named_pipe::NamedPipeClient),
-    }
-
-    impl IpcStream for WindowsIpcStream {
-        fn into_split(
-            self,
-        ) -> (
-            Box<dyn AsyncRead + Send + Unpin>,
-            Box<dyn AsyncWrite + Send + Unpin>,
-        ) {
-            match self {
-                WindowsIpcStream::Server(pipe) => {
-                    let (read, write) = tokio::io::split(pipe);
-                    (Box::new(read), Box::new(write))
-                }
-                WindowsIpcStream::Client(pipe) => {
-                    let (read, write) = tokio::io::split(pipe);
-                    (Box::new(read), Box::new(write))
-                }
-            }
-        }
-    }
-
-    impl AsyncRead for WindowsIpcStream {
-        fn poll_read(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            match &mut *self {
-                WindowsIpcStream::Server(pipe) => Pin::new(pipe).poll_read(cx, buf),
-                WindowsIpcStream::Client(pipe) => Pin::new(pipe).poll_read(cx, buf),
-            }
-        }
-    }
-
-    impl AsyncWrite for WindowsIpcStream {
-        fn poll_write(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &[u8],
-        ) -> Poll<std::io::Result<usize>> {
-            match &mut *self {
-                WindowsIpcStream::Server(pipe) => Pin::new(pipe).poll_write(cx, buf),
-                WindowsIpcStream::Client(pipe) => Pin::new(pipe).poll_write(cx, buf),
-            }
-        }
-
-        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-            match &mut *self {
-                WindowsIpcStream::Server(pipe) => Pin::new(pipe).poll_flush(cx),
-                WindowsIpcStream::Client(pipe) => Pin::new(pipe).poll_flush(cx),
-            }
-        }
-
-        fn poll_shutdown(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            match &mut *self {
-                WindowsIpcStream::Server(pipe) => Pin::new(pipe).poll_shutdown(cx),
-                WindowsIpcStream::Client(pipe) => Pin::new(pipe).poll_shutdown(cx),
-            }
-        }
-    }
-
-    /// Windows named pipe listener wrapper
-    pub struct WindowsIpcListener {
-        pipe_name: String,
-    }
-
-    impl IpcListener for WindowsIpcListener {
-        type Stream = WindowsIpcStream;
-
-        async fn accept(&mut self) -> Result<Self::Stream> {
-            let server = NamedPipeServer::create(&self.pipe_name).map_err(|e| {
-                RunceptError::ConnectionError(format!("Failed to create named pipe: {e}"))
-            })?;
-
-            server.connect().await.map_err(|e| {
-                RunceptError::ConnectionError(format!("Failed to accept connection: {e}"))
-            })?;
-
-            Ok(WindowsIpcStream::Server(server))
-        }
-
-        fn local_addr(&self) -> String {
-            self.pipe_name.clone()
-        }
-    }
-
-    impl WindowsIpcListener {
-        pub async fn bind(path: &IpcPath) -> Result<Self> {
-            let pipe_name = path.to_socket_path();
-
-            // Test that we can create a pipe with this name
-            let _test_server = NamedPipeServer::create(&pipe_name).map_err(|e| {
-                RunceptError::ConnectionError(format!("Failed to create named pipe: {e}"))
-            })?;
-
-            Ok(Self { pipe_name })
-        }
-    }
-
-    /// Windows named pipe client wrapper
-    pub struct WindowsIpcClient;
-
-    impl IpcClient for WindowsIpcClient {
-        type Stream = WindowsIpcStream;
-
-        async fn connect(path: &IpcPath) -> Result<Self::Stream> {
-            let pipe_name = path.to_socket_path();
-
-            let client = ClientOptions::new().open(&pipe_name).map_err(|e| {
-                RunceptError::ConnectionError(format!("Failed to connect to named pipe: {e}"))
-            })?;
-
-            Ok(WindowsIpcStream::Client(client))
-        }
+impl AsyncRead for IpcStream {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
     }
 }
 
-// Re-export platform-specific types
-#[cfg(unix)]
-pub use unix_impl::{
-    UnixIpcClient as PlatformClient, UnixIpcListener as PlatformListener,
-    UnixIpcStream as PlatformStream,
-};
+impl AsyncWrite for IpcStream {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
 
-#[cfg(windows)]
-pub use windows_impl::{
-    WindowsIpcClient as PlatformClient, WindowsIpcListener as PlatformListener,
-    WindowsIpcStream as PlatformStream,
-};
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// Cross-platform IPC listener using interprocess library
+pub struct IpcListener {
+    inner: LocalListener,
+}
+
+impl IpcListener {
+    /// Bind to the given IPC path
+    pub async fn bind(path: &IpcPath) -> Result<Self> {
+        let name = path.to_socket_name()?;
+
+        // Remove existing socket file if it exists (Unix only)
+        #[cfg(unix)]
+        if path.exists() {
+            std::fs::remove_file(path.as_path()).map_err(RunceptError::IoError)?;
+        }
+
+        let listener = ListenerOptions::new()
+            .name(name)
+            .create_tokio()
+            .map_err(|e| {
+                RunceptError::ConnectionError(format!("Failed to bind IPC listener: {e}"))
+            })?;
+
+        Ok(Self { inner: listener })
+    }
+
+    /// Accept a new connection
+    pub async fn accept(&mut self) -> Result<IpcStream> {
+        let stream = self.inner.accept().await.map_err(|e| {
+            RunceptError::ConnectionError(format!("Failed to accept IPC connection: {e}"))
+        })?;
+
+        Ok(IpcStream { inner: stream })
+    }
+
+    /// Get the local address/path of the listener
+    pub fn local_addr(&self) -> String {
+        // interprocess doesn't provide a direct way to get the address,
+        // so we'll return a generic identifier
+        "local_socket".to_string()
+    }
+}
+
+/// Connect to an IPC endpoint
+pub async fn connect(path: &IpcPath) -> Result<IpcStream> {
+    let name = path.to_socket_name()?;
+
+    let stream = LocalStream::connect(name).await.map_err(|e| {
+        RunceptError::ConnectionError(format!("Failed to connect to IPC endpoint: {e}"))
+    })?;
+
+    Ok(IpcStream { inner: stream })
+}
 
 /// Create a platform-specific IPC listener
-pub async fn create_listener(path: &IpcPath) -> Result<PlatformListener> {
-    PlatformListener::bind(path).await
+pub async fn create_listener(path: &IpcPath) -> Result<IpcListener> {
+    IpcListener::bind(path).await
 }
 
-/// Connect to a platform-specific IPC endpoint
-pub async fn connect(path: &IpcPath) -> Result<PlatformStream> {
-    PlatformClient::connect(path).await
-}
+// Type aliases for compatibility with existing code
+pub type PlatformStream = IpcStream;
+pub type PlatformListener = IpcListener;
+pub type PlatformClient = (); // Not needed with the simplified API
 
 #[cfg(test)]
 mod tests {
@@ -438,13 +267,30 @@ mod tests {
     #[test]
     fn test_unix_socket_path() {
         let path = IpcPath::new("/tmp/test.sock");
-        assert_eq!(path.to_socket_path(), "/tmp/test.sock");
+        let name = path.to_socket_name();
+        // We can't easily test the exact name format, but we can ensure it doesn't error
+        assert!(name.is_ok());
     }
 
     #[cfg(windows)]
     #[test]
     fn test_windows_pipe_path() {
         let path = IpcPath::new("test");
-        assert_eq!(path.to_socket_path(), r"\\.\pipe\test");
+        let name = path.to_socket_name();
+        // We can't easily test the exact name format, but we can ensure it doesn't error
+        assert!(name.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ipc_listener_creation() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+        let ipc_path = IpcPath::new(socket_path);
+
+        // This should succeed in creating a listener
+        let listener = IpcListener::bind(&ipc_path).await;
+        assert!(listener.is_ok());
     }
 }

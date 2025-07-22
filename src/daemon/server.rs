@@ -9,7 +9,7 @@ use crate::error::{Result, RunceptError};
 use crate::process::DefaultProcessOrchestrationService;
 use crate::scheduler::InactivityScheduler;
 
-use crate::ipc::{IpcListener, IpcPath, create_listener};
+use crate::ipc::{IpcPath, create_listener};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::{RwLock, mpsc};

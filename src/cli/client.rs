@@ -1,6 +1,6 @@
 use crate::cli::commands::{DaemonRequest, DaemonResponse};
 use crate::error::{Result, RunceptError};
-use crate::ipc::{IpcPath, IpcStream, connect};
+use crate::ipc::{IpcPath, connect};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
