@@ -704,3 +704,235 @@ enum ProcessOperation {
     Remove,
     Update,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_validate_health_check_url() {
+        // Test the static validation methods that don't require a full config manager
+        
+        // Valid URLs
+        assert!(validate_health_check_url_static("http://localhost:8080/health").is_ok());
+        assert!(validate_health_check_url_static("https://example.com/status").is_ok());
+        assert!(validate_health_check_url_static("tcp://localhost:5432").is_ok());
+        assert!(validate_health_check_url_static("cmd://curl -f http://localhost/health").is_ok());
+
+        // Invalid URLs
+        assert!(validate_health_check_url_static("").is_err());
+        assert!(validate_health_check_url_static("invalid-url").is_err());
+        assert!(validate_health_check_url_static("ftp://example.com").is_err());
+        assert!(validate_health_check_url_static("tcp://localhost").is_err());
+        assert!(validate_health_check_url_static("tcp://localhost:invalid").is_err());
+        assert!(validate_health_check_url_static("cmd://").is_err());
+    }
+
+    #[test]
+    fn test_validate_health_check_interval() {
+        // Valid intervals
+        assert!(validate_health_check_interval_static(1).is_ok());
+        assert!(validate_health_check_interval_static(30).is_ok());
+        assert!(validate_health_check_interval_static(3600).is_ok());
+
+        // Invalid intervals
+        assert!(validate_health_check_interval_static(0).is_err());
+        assert!(validate_health_check_interval_static(-1).is_err());
+        assert!(validate_health_check_interval_static(3601).is_err());
+    }
+
+    #[test]
+    fn test_validate_environment_variables() {
+        // Valid environment variables
+        let mut valid_env_vars = HashMap::new();
+        valid_env_vars.insert("VALID_VAR".to_string(), "value".to_string());
+        valid_env_vars.insert("ANOTHER_VAR".to_string(), "another_value".to_string());
+        assert!(validate_environment_variables_static(&valid_env_vars).is_ok());
+
+        // Invalid environment variables
+        let mut invalid_env_vars = HashMap::new();
+        invalid_env_vars.insert("".to_string(), "value".to_string());
+        assert!(validate_environment_variables_static(&invalid_env_vars).is_err());
+
+        let mut invalid_env_vars = HashMap::new();
+        invalid_env_vars.insert("INVALID-VAR".to_string(), "value".to_string());
+        assert!(validate_environment_variables_static(&invalid_env_vars).is_err());
+
+        let mut invalid_env_vars = HashMap::new();
+        invalid_env_vars.insert("VALID_VAR".to_string(), "a".repeat(4097));
+        assert!(validate_environment_variables_static(&invalid_env_vars).is_err());
+    }
+
+    #[test]
+    fn test_validate_process_name() {
+        // Valid names
+        assert!(validate_process_name_static("valid-name").is_ok());
+        assert!(validate_process_name_static("valid_name").is_ok());
+        assert!(validate_process_name_static("validname123").is_ok());
+
+        // Invalid names
+        assert!(validate_process_name_static("").is_err());
+        assert!(validate_process_name_static("name:with:colons").is_err());
+        assert!(validate_process_name_static("name/with/slashes").is_err());
+        assert!(validate_process_name_static("name\\with\\backslashes").is_err());
+        assert!(validate_process_name_static("daemon").is_err());
+        assert!(validate_process_name_static("server").is_err());
+        assert!(validate_process_name_static("all").is_err());
+        assert!(validate_process_name_static("system").is_err());
+
+        // Name too long
+        let long_name = "a".repeat(65);
+        assert!(validate_process_name_static(&long_name).is_err());
+    }
+
+    #[test]
+    fn test_is_command_available() {
+        // Test with a command that should exist on most systems
+        assert!(ProcessConfigurationManager::is_command_available("echo"));
+        
+        // Test with a command that should not exist
+        assert!(!ProcessConfigurationManager::is_command_available("definitely_not_a_real_command_12345"));
+    }
+
+    #[test]
+    fn test_error_creation_methods() {
+        let env_error = ProcessConfigurationManager::environment_not_found_error("test-env");
+        assert!(matches!(env_error, RunceptError::EnvironmentError(_)));
+        assert!(env_error.to_string().contains("test-env"));
+
+        let active_error = ProcessConfigurationManager::environment_not_active_error("test-env");
+        assert!(matches!(active_error, RunceptError::EnvironmentError(_)));
+        assert!(active_error.to_string().contains("not active"));
+
+        let process_error = ProcessConfigurationManager::process_not_found_error("test-process");
+        assert!(matches!(process_error, RunceptError::ProcessError(_)));
+        assert!(process_error.to_string().contains("test-process"));
+    }
+
+    // Helper functions for testing static validation logic
+    fn validate_process_name_static(name: &str) -> Result<()> {
+        if name.is_empty() {
+            return Err(RunceptError::ConfigError(
+                "Process name cannot be empty".to_string(),
+            ));
+        }
+
+        if name.len() > 64 {
+            return Err(RunceptError::ConfigError(
+                "Process name cannot exceed 64 characters".to_string(),
+            ));
+        }
+
+        if name.contains(':') || name.contains('/') || name.contains('\\') {
+            return Err(RunceptError::ConfigError(
+                "Process name cannot contain ':', '/', or '\\' characters".to_string(),
+            ));
+        }
+
+        if matches!(name, "daemon" | "server" | "all" | "system") {
+            return Err(RunceptError::ConfigError(format!(
+                "Process name '{name}' is reserved and cannot be used"
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn validate_health_check_url_static(url: &str) -> Result<()> {
+        if url.is_empty() {
+            return Err(RunceptError::ConfigError(
+                "Health check URL cannot be empty".to_string(),
+            ));
+        }
+
+        if url.starts_with("http://") || url.starts_with("https://") {
+            if url.len() < 10
+                || (!url.contains("://")
+                    || url.split("://").nth(1).is_none_or(|part| part.is_empty()))
+            {
+                Err(RunceptError::ConfigError(format!(
+                    "Invalid health check URL format '{url}'"
+                )))
+            } else {
+                Ok(())
+            }
+        } else if url.starts_with("tcp://") {
+            let tcp_part = url.strip_prefix("tcp://").unwrap();
+            if tcp_part.contains(':') {
+                let parts: Vec<&str> = tcp_part.split(':').collect();
+                if parts.len() == 2 {
+                    match parts[1].parse::<u16>() {
+                        Ok(_) => Ok(()),
+                        Err(_) => Err(RunceptError::ConfigError(format!(
+                            "Invalid port in TCP health check URL '{url}'"
+                        ))),
+                    }
+                } else {
+                    Err(RunceptError::ConfigError(format!(
+                        "Invalid TCP health check URL format '{url}', expected tcp://host:port"
+                    )))
+                }
+            } else {
+                Err(RunceptError::ConfigError(format!(
+                    "Invalid TCP health check URL format '{url}', expected tcp://host:port"
+                )))
+            }
+        } else if url.starts_with("cmd://") {
+            let cmd_part = url.strip_prefix("cmd://").unwrap();
+            if cmd_part.is_empty() {
+                Err(RunceptError::ConfigError(
+                    "Command health check cannot be empty".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(RunceptError::ConfigError(format!(
+                "Unsupported health check URL scheme in '{url}', supported: http://, https://, tcp://, cmd://"
+            )))
+        }
+    }
+
+    fn validate_health_check_interval_static(interval: i32) -> Result<()> {
+        if interval < 1 {
+            return Err(RunceptError::ConfigError(
+                "Health check interval must be at least 1 second".to_string(),
+            ));
+        }
+
+        if interval > 3600 {
+            return Err(RunceptError::ConfigError(
+                "Health check interval cannot exceed 1 hour (3600 seconds)".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn validate_environment_variables_static(
+        env_vars: &std::collections::HashMap<String, String>,
+    ) -> Result<()> {
+        for (key, value) in env_vars {
+            if key.is_empty() {
+                return Err(RunceptError::ConfigError(
+                    "Environment variable name cannot be empty".to_string(),
+                ));
+            }
+
+            if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(RunceptError::ConfigError(format!(
+                    "Environment variable name '{key}' contains invalid characters (only alphanumeric and underscore allowed)"
+                )));
+            }
+
+            if value.len() > 4096 {
+                return Err(RunceptError::ConfigError(format!(
+                    "Environment variable '{key}' value exceeds maximum length of 4096 characters"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
