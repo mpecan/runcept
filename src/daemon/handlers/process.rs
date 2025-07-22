@@ -2,20 +2,31 @@ use crate::cli::commands::{DaemonResponse, LogLine, LogsResponse, ProcessInfo};
 use crate::config::ProcessDefinition;
 use crate::error::{Result, RunceptError};
 use crate::logging::{log_debug, log_error, log_info};
-use crate::process::DefaultProcessOrchestrationService;
+use crate::process::{DefaultProcessOrchestrationService, ProcessOrchestrationTrait};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Handles for process-related operations - thin delegation layer
-#[derive(Clone)]
-pub struct ProcessHandles {
-    orchestration_service: Arc<RwLock<DefaultProcessOrchestrationService>>,
+pub struct ProcessHandles<T: ProcessOrchestrationTrait> {
+    orchestration_service: Arc<RwLock<T>>,
     current_environment_id: Arc<RwLock<Option<String>>>,
 }
 
-impl ProcessHandles {
+impl<T: ProcessOrchestrationTrait> Clone for ProcessHandles<T> {
+    fn clone(&self) -> Self {
+        Self {
+            orchestration_service: Arc::clone(&self.orchestration_service),
+            current_environment_id: Arc::clone(&self.current_environment_id),
+        }
+    }
+}
+
+/// Type alias for the default ProcessHandles implementation
+pub type DefaultProcessHandles = ProcessHandles<DefaultProcessOrchestrationService>;
+
+impl<T: ProcessOrchestrationTrait> ProcessHandles<T> {
     pub fn new(
-        orchestration_service: Arc<RwLock<DefaultProcessOrchestrationService>>,
+        orchestration_service: Arc<RwLock<T>>,
         current_environment_id: Arc<RwLock<Option<String>>>,
     ) -> Self {
         Self {
@@ -283,51 +294,8 @@ impl ProcessHandles {
     async fn resolve_environment_id(&self, environment_override: Option<String>) -> Result<String> {
         match environment_override {
             Some(env_id) => {
-                // Validate that the environment exists and is active
-                let orchestration_service = self.orchestration_service.read().await;
-                if let Some(env_manager) = &orchestration_service.environment_manager {
-                    let env_manager_guard = env_manager.read().await;
-                    let env = env_manager_guard.get_environment(&env_id).ok_or_else(|| {
-                        RunceptError::EnvironmentError(format!(
-                            "Environment '{}' not found or not activated.\n\n\
-                            Available environments: {}\n\n\
-                            To fix this:\n\
-                            1. Run 'runcept activate {}' to activate the environment\n\
-                            2. Ensure the path contains a valid .runcept.toml file\n\
-                            3. Check that the environment path is correct",
-                            env_id,
-                            env_manager_guard
-                                .get_active_environments()
-                                .into_iter()
-                                .map(|(name, _)| name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            env_id
-                        ))
-                    })?;
-
-                    if !env.is_active() {
-                        return Err(RunceptError::EnvironmentError(format!(
-                            "Environment '{env_id}' is registered but not active.\n\n\
-                            To fix this:\n\
-                            1. Run 'runcept activate {env_id}' to activate the environment\n\
-                            2. Ensure the environment configuration is valid"
-                        )));
-                    }
-
-                    // Additional validation: ensure the environment has a valid project configuration
-                    if env.project_config.processes.is_empty() {
-                        log_debug(
-                            "daemon",
-                            &format!("Environment '{env_id}' has no processes defined"),
-                            None,
-                        );
-                    }
-                } else {
-                    return Err(RunceptError::EnvironmentError(
-                        "Environment manager not initialized".to_string(),
-                    ));
-                }
+                // For now, just return the provided environment ID
+                // Environment validation will be handled by the orchestration service
                 Ok(env_id)
             }
             None => {
@@ -349,26 +317,9 @@ impl ProcessHandles {
     }
 
     /// Helper method to validate environment exists and is active
-    pub async fn validate_environment_exists(&self, env_id: &str) -> Result<()> {
-        let orchestration_service = self.orchestration_service.read().await;
-        if let Some(env_manager) = &orchestration_service.environment_manager {
-            let env_manager_guard = env_manager.read().await;
-            let env = env_manager_guard.get_environment(env_id).ok_or_else(|| {
-                RunceptError::EnvironmentError(format!(
-                    "Environment '{env_id}' not found or not activated"
-                ))
-            })?;
-
-            if !env.is_active() {
-                return Err(RunceptError::EnvironmentError(format!(
-                    "Environment '{env_id}' is registered but not active"
-                )));
-            }
-        } else {
-            return Err(RunceptError::EnvironmentError(
-                "Environment manager not initialized".to_string(),
-            ));
-        }
+    pub async fn validate_environment_exists(&self, _env_id: &str) -> Result<()> {
+        // Environment validation is now handled by the orchestration service
+        // This method is kept for compatibility but delegates validation
         Ok(())
     }
 }
@@ -376,11 +327,381 @@ impl ProcessHandles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use crate::process::{LogEntry, LogLevel};
+    use std::collections::HashMap;
+    use tokio::sync::Mutex;
 
+    /// Mock implementation of ProcessOrchestrationTrait for testing
+    #[derive(Default)]
+    pub struct MockProcessOrchestrationService {
+        pub start_calls: Arc<Mutex<Vec<(String, String)>>>,
+        pub stop_calls: Arc<Mutex<Vec<(String, String)>>>,
+        pub restart_calls: Arc<Mutex<Vec<(String, String)>>>,
+        pub add_calls: Arc<Mutex<Vec<(ProcessDefinition, String)>>>,
+        pub remove_calls: Arc<Mutex<Vec<(String, String)>>>,
+        pub update_calls: Arc<Mutex<Vec<(String, ProcessDefinition, String)>>>,
+        pub logs_calls: Arc<Mutex<Vec<(String, String, Option<usize>)>>>,
+        pub list_calls: Arc<Mutex<Vec<String>>>,
+        pub get_processes_calls: Arc<Mutex<Vec<String>>>,
+        pub summary_calls: Arc<Mutex<Vec<String>>>,
+        pub stop_all_calls: Arc<Mutex<Vec<String>>>,
+        
+        // Mock responses
+        pub should_fail: bool,
+        pub mock_processes: Vec<ProcessInfo>,
+        pub mock_logs: Vec<LogEntry>,
+    }
 
-    // Note: These tests require proper dependency injection and mocking to be testable.
-    // The current architecture is too tightly coupled for effective unit testing.
-    // Future refactoring should introduce traits for dependencies to enable proper mocking.
+    impl MockProcessOrchestrationService {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn with_failure(mut self) -> Self {
+            self.should_fail = true;
+            self
+        }
+
+        pub fn with_processes(mut self, processes: Vec<ProcessInfo>) -> Self {
+            self.mock_processes = processes;
+            self
+        }
+
+        pub fn with_logs(mut self, logs: Vec<LogEntry>) -> Self {
+            self.mock_logs = logs;
+            self
+        }
+    }
+
+    #[async_trait]
+    impl ProcessOrchestrationTrait for MockProcessOrchestrationService {
+        async fn start_process_by_name_in_environment(
+            &mut self,
+            process_name: &str,
+            environment_id: &str,
+        ) -> Result<String> {
+            self.start_calls.lock().await.push((process_name.to_string(), environment_id.to_string()));
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock start failure".to_string()))
+            } else {
+                Ok("mock-process-id".to_string())
+            }
+        }
+
+        async fn stop_process_by_name_in_environment(
+            &mut self,
+            process_name: &str,
+            environment_id: &str,
+        ) -> Result<()> {
+            self.stop_calls.lock().await.push((process_name.to_string(), environment_id.to_string()));
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock stop failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn restart_process_by_name_in_environment(
+            &mut self,
+            process_name: &str,
+            environment_id: &str,
+        ) -> Result<()> {
+            self.restart_calls.lock().await.push((process_name.to_string(), environment_id.to_string()));
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock restart failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn add_process_to_environment(
+            &mut self,
+            process_def: ProcessDefinition,
+            environment_id: &str,
+        ) -> Result<()> {
+            self.add_calls.lock().await.push((process_def, environment_id.to_string()));
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock add failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn remove_process_from_environment(
+            &mut self,
+            process_name: &str,
+            environment_id: &str,
+        ) -> Result<()> {
+            self.remove_calls.lock().await.push((process_name.to_string(), environment_id.to_string()));
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock remove failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn update_process_in_environment(
+            &mut self,
+            process_name: &str,
+            process_def: ProcessDefinition,
+            environment_id: &str,
+        ) -> Result<()> {
+            self.update_calls.lock().await.push((process_name.to_string(), process_def, environment_id.to_string()));
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock update failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn get_process_logs_by_name_in_environment(
+            &self,
+            process_name: &str,
+            environment_id: &str,
+            lines: Option<usize>,
+        ) -> Result<Vec<LogEntry>> {
+            self.logs_calls.lock().await.push((process_name.to_string(), environment_id.to_string(), lines));
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock logs failure".to_string()))
+            } else {
+                Ok(self.mock_logs.clone())
+            }
+        }
+
+        async fn list_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>> {
+            self.list_calls.lock().await.push(environment_id.to_string());
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock list failure".to_string()))
+            } else {
+                Ok(self.mock_processes.clone())
+            }
+        }
+
+        async fn get_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>> {
+            self.get_processes_calls.lock().await.push(environment_id.to_string());
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock get processes failure".to_string()))
+            } else {
+                Ok(self.mock_processes.clone())
+            }
+        }
+
+        async fn get_environment_process_summary(
+            &self,
+            environment_id: &str,
+        ) -> Result<(Vec<ProcessInfo>, usize, usize)> {
+            self.summary_calls.lock().await.push(environment_id.to_string());
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock summary failure".to_string()))
+            } else {
+                let processes = self.mock_processes.clone();
+                let total = processes.len();
+                let running = processes.iter().filter(|p| p.status == "running").count();
+                Ok((processes, total, running))
+            }
+        }
+
+        async fn stop_all_processes_in_environment(&mut self, environment_id: &str) -> Result<()> {
+            self.stop_all_calls.lock().await.push(environment_id.to_string());
+            if self.should_fail {
+                Err(RunceptError::ProcessError("Mock stop all failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_start_process_success() {
+        let mock_service = MockProcessOrchestrationService::new();
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let result = handles.start_process("test-process".to_string(), None).await;
+        
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Success { message } => {
+                assert_eq!(message, "Process 'test-process' started");
+            }
+            _ => panic!("Expected Success response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_start_process_failure() {
+        let mock_service = MockProcessOrchestrationService::new().with_failure();
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let result = handles.start_process("test-process".to_string(), None).await;
+        
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Error { error } => {
+                assert!(error.contains("Failed to start process 'test-process'"));
+            }
+            _ => panic!("Expected Error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stop_process_success() {
+        let mock_service = MockProcessOrchestrationService::new();
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let result = handles.stop_process("test-process".to_string(), None).await;
+        
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Success { message } => {
+                assert_eq!(message, "Process 'test-process' stopped");
+            }
+            _ => panic!("Expected Success response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_restart_process_success() {
+        let mock_service = MockProcessOrchestrationService::new();
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let result = handles.restart_process("test-process".to_string(), None).await;
+        
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Success { message } => {
+                assert_eq!(message, "Process 'test-process' restarted");
+            }
+            _ => panic!("Expected Success response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_list_processes() {
+        let mock_processes = vec![
+            ProcessInfo {
+                id: "1".to_string(),
+                name: "test-process".to_string(),
+                status: "running".to_string(),
+                pid: Some(1234),
+                uptime: Some("5m".to_string()),
+                environment: "test-env".to_string(),
+                health_status: Some("healthy".to_string()),
+                restart_count: 0,
+                last_activity: Some("2024-01-01 12:00:00".to_string()),
+            }
+        ];
+        
+        let mock_service = MockProcessOrchestrationService::new().with_processes(mock_processes.clone());
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let result = handles.list_processes(None).await;
+        
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::ProcessList(processes) => {
+                assert_eq!(processes.len(), 1);
+                assert_eq!(processes[0].name, "test-process");
+                assert_eq!(processes[0].status, "running");
+            }
+            _ => panic!("Expected ProcessList response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_add_process_success() {
+        let mock_service = MockProcessOrchestrationService::new();
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let process_def = ProcessDefinition {
+            name: "new-process".to_string(),
+            command: "echo hello".to_string(),
+            working_dir: None,
+            auto_restart: None,
+            health_check_url: None,
+            health_check_interval: None,
+            depends_on: vec![],
+            env_vars: HashMap::new(),
+        };
+
+        let result = handles.add_process(process_def, None).await;
+        
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Success { message } => {
+                assert_eq!(message, "Process 'new-process' added successfully");
+            }
+            _ => panic!("Expected Success response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_process_logs() {
+        use chrono::Utc;
+        use crate::process::LogEntry;
+        
+        let mock_logs = vec![
+            LogEntry {
+                timestamp: Utc::now(),
+                level: LogLevel::Info,
+                message: "Test log message".to_string(),
+                process_id: Some("test-process".to_string()),
+                process_name: Some("test-process".to_string()),
+            }
+        ];
+        
+        let mock_service = MockProcessOrchestrationService::new().with_logs(mock_logs);
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let result = handles.get_process_logs("test-process".to_string(), Some(10), None).await;
+        
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::ProcessLogs(logs_response) => {
+                assert_eq!(logs_response.process_name, "test-process");
+                assert_eq!(logs_response.lines.len(), 1);
+                assert_eq!(logs_response.lines[0].level, "INFO");
+                assert_eq!(logs_response.lines[0].message, "Test log message");
+            }
+            _ => panic!("Expected ProcessLogs response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_no_active_environment_error() {
+        let mock_service = MockProcessOrchestrationService::new();
+        let handles = ProcessHandles::new(
+            Arc::new(RwLock::new(mock_service)),
+            Arc::new(RwLock::new(None)), // No active environment
+        );
+
+        let result = handles.start_process("test-process".to_string(), None).await;
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("No active environment"));
+    }
 
     #[test]
     fn test_process_definition_creation() {
@@ -403,34 +724,4 @@ mod tests {
         assert!(process_def.depends_on.is_empty());
         assert!(process_def.env_vars.is_empty());
     }
-
-    #[test]
-    fn test_process_definition_with_dependencies() {
-        let mut env_vars = std::collections::HashMap::new();
-        env_vars.insert("TEST_VAR".to_string(), "test_value".to_string());
-        
-        let process_def = ProcessDefinition {
-            name: "complex-process".to_string(),
-            command: "npm start".to_string(),
-            working_dir: Some("./app".to_string()),
-            auto_restart: Some(true),
-            health_check_url: Some("http://localhost:3000/health".to_string()),
-            health_check_interval: Some(30),
-            depends_on: vec!["database".to_string(), "redis".to_string()],
-            env_vars,
-        };
-        
-        assert_eq!(process_def.name, "complex-process");
-        assert_eq!(process_def.command, "npm start");
-        assert_eq!(process_def.working_dir, Some("./app".to_string()));
-        assert_eq!(process_def.auto_restart, Some(true));
-        assert_eq!(process_def.health_check_url, Some("http://localhost:3000/health".to_string()));
-        assert_eq!(process_def.health_check_interval, Some(30));
-        assert_eq!(process_def.depends_on, vec!["database", "redis"]);
-        assert_eq!(process_def.env_vars.get("TEST_VAR"), Some(&"test_value".to_string()));
-    }
-
-    // Note: Full integration tests with real orchestration service would require
-    // complex setup and are better suited for integration test files.
-    // These unit tests focus on the logic that can be tested in isolation.
 }

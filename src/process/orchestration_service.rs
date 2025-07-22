@@ -4,8 +4,9 @@ use crate::error::{Result, RunceptError};
 use crate::process::configuration::ProcessConfigurationManager;
 use crate::process::{
     DefaultHealthCheckService, DefaultProcessRuntime, HealthCheckTrait, LogEntry,
-    ProcessExecutionService, ProcessRepositoryTrait, ProcessRuntimeTrait,
+    ProcessExecutionService, ProcessOrchestrationTrait, ProcessRepositoryTrait, ProcessRuntimeTrait,
 };
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -536,6 +537,99 @@ impl DefaultProcessOrchestrationService {
             Some(env_manager),
             process_repository,
         ))
+    }
+}
+
+#[async_trait]
+impl<R, RT, H> ProcessOrchestrationTrait for ProcessOrchestrationService<R, RT, H>
+where
+    R: ProcessRepositoryTrait + 'static,
+    RT: ProcessRuntimeTrait,
+    H: HealthCheckTrait,
+{
+    async fn start_process_by_name_in_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<String> {
+        self.start_process_by_name_in_environment(process_name, environment_id)
+            .await
+    }
+
+    async fn stop_process_by_name_in_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<()> {
+        self.stop_process_by_name_in_environment(process_name, environment_id)
+            .await
+    }
+
+    async fn restart_process_by_name_in_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<()> {
+        self.restart_process_by_name_in_environment(process_name, environment_id)
+            .await
+    }
+
+    async fn add_process_to_environment(
+        &mut self,
+        process_def: ProcessDefinition,
+        environment_id: &str,
+    ) -> Result<()> {
+        self.add_process_to_environment(process_def, environment_id)
+            .await
+    }
+
+    async fn remove_process_from_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<()> {
+        self.remove_process_from_environment(process_name, environment_id)
+            .await
+    }
+
+    async fn update_process_in_environment(
+        &mut self,
+        process_name: &str,
+        process_def: ProcessDefinition,
+        environment_id: &str,
+    ) -> Result<()> {
+        self.update_process_in_environment(process_name, process_def, environment_id)
+            .await
+    }
+
+    async fn get_process_logs_by_name_in_environment(
+        &self,
+        process_name: &str,
+        environment_id: &str,
+        lines: Option<usize>,
+    ) -> Result<Vec<LogEntry>> {
+        self.get_process_logs_by_name_in_environment(process_name, environment_id, lines)
+            .await
+    }
+
+    async fn list_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>> {
+        self.list_processes_for_environment(environment_id).await
+    }
+
+    async fn get_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>> {
+        self.get_processes_for_environment(environment_id).await
+    }
+
+    async fn get_environment_process_summary(
+        &self,
+        environment_id: &str,
+    ) -> Result<(Vec<ProcessInfo>, usize, usize)> {
+        self.get_environment_process_summary(environment_id).await
+    }
+
+    async fn stop_all_processes_in_environment(&mut self, environment_id: &str) -> Result<()> {
+        self.stop_all_processes_in_environment(environment_id)
+            .await
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::cli::commands::{DaemonResponse, EnvironmentStatusResponse};
 use crate::config::{EnvironmentManager, GlobalConfig, ProjectConfig};
-use crate::daemon::handlers::ProcessHandles;
+use crate::daemon::handlers::process::DefaultProcessHandles;
 use crate::error::{Result, RunceptError};
 use crate::scheduler::InactivityScheduler;
 use std::path::PathBuf;
@@ -10,8 +10,7 @@ use tokio::sync::RwLock;
 /// Handles for environment-related operations
 #[derive(Clone)]
 pub struct EnvironmentHandles {
-    process_handles: ProcessHandles,
-    environment_manager: Arc<RwLock<EnvironmentManager>>,
+        process_handles: DefaultProcessHandles,    environment_manager: Arc<RwLock<EnvironmentManager>>,
     inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
     current_environment_id: Arc<RwLock<Option<String>>>,
     global_config: GlobalConfig,
@@ -19,8 +18,7 @@ pub struct EnvironmentHandles {
 
 impl EnvironmentHandles {
     pub fn new(
-        process_handles: ProcessHandles,
-        environment_manager: Arc<RwLock<EnvironmentManager>>,
+    process_handles: DefaultProcessHandles,        environment_manager: Arc<RwLock<EnvironmentManager>>,
         inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
         current_environment_id: Arc<RwLock<Option<String>>>,
         global_config: GlobalConfig,

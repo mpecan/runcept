@@ -1,6 +1,8 @@
+use crate::cli::commands::ProcessInfo;
+use crate::config::ProcessDefinition;
 use crate::database::process_repository::ProcessRecord;
 use crate::error::Result;
-use crate::process::Process;
+use crate::process::{LogEntry, Process};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -183,4 +185,80 @@ pub struct HealthCheckResult {
     pub message: String,
     pub duration_ms: u64,
     pub timestamp: DateTime<Utc>,
+}
+
+/// Trait for process orchestration operations
+///
+/// This trait abstracts the high-level process orchestration operations,
+/// enabling testing with mock implementations and providing a clean
+/// interface for process management workflows.
+#[async_trait]
+pub trait ProcessOrchestrationTrait: Send + Sync {
+    // Core Orchestration Methods
+
+    /// Start a process by name in the specified environment
+    async fn start_process_by_name_in_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<String>;
+
+    /// Stop a process by name in the specified environment
+    async fn stop_process_by_name_in_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<()>;
+
+    /// Restart a process by name in the specified environment
+    async fn restart_process_by_name_in_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<()>;
+
+    /// Add a process to the specified environment
+    async fn add_process_to_environment(
+        &mut self,
+        process_def: ProcessDefinition,
+        environment_id: &str,
+    ) -> Result<()>;
+
+    /// Remove a process from the specified environment
+    async fn remove_process_from_environment(
+        &mut self,
+        process_name: &str,
+        environment_id: &str,
+    ) -> Result<()>;
+
+    /// Update a process in the specified environment
+    async fn update_process_in_environment(
+        &mut self,
+        process_name: &str,
+        process_def: ProcessDefinition,
+        environment_id: &str,
+    ) -> Result<()>;
+
+    /// Get process logs by name in the specified environment
+    async fn get_process_logs_by_name_in_environment(
+        &self,
+        process_name: &str,
+        environment_id: &str,
+        lines: Option<usize>,
+    ) -> Result<Vec<LogEntry>>;
+
+    /// List running processes for the specified environment
+    async fn list_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>>;
+
+    /// Get comprehensive process information for an environment
+    async fn get_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>>;
+
+    /// Get process summary for an environment (processes, total count, running count)
+    async fn get_environment_process_summary(
+        &self,
+        environment_id: &str,
+    ) -> Result<(Vec<ProcessInfo>, usize, usize)>;
+
+    /// Stop all processes in the specified environment
+    async fn stop_all_processes_in_environment(&mut self, environment_id: &str) -> Result<()>;
 }

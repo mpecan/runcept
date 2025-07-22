@@ -689,7 +689,7 @@ impl ProcessConfigurationManager {
     }
 
     fn environment_not_active_error(environment_id: &str) -> RunceptError {
-        RunceptError::EnvironmentError(format!("Environment '{environment_id}' is not active"))
+        RunceptError::EnvironmentError(format!("Environment '{environment_id}' is registered but not active"))
     }
 
     fn process_not_found_error(process_name: &str) -> RunceptError {
