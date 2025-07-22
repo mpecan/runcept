@@ -107,9 +107,8 @@ impl ConnectionHandler {
     /// Helper method to parse a request from JSON string
     #[cfg(test)]
     pub fn parse_request(json: &str) -> Result<DaemonRequest> {
-        serde_json::from_str(json.trim()).map_err(|e| {
-            RunceptError::SerializationError(format!("Invalid request: {e}"))
-        })
+        serde_json::from_str(json.trim())
+            .map_err(|e| RunceptError::SerializationError(format!("Invalid request: {e}")))
     }
 
     /// Helper method to serialize a response to JSON string
@@ -123,11 +122,15 @@ impl ConnectionHandler {
 
     /// Helper method to write response to stream
     #[cfg(test)]
-    pub async fn write_response_to_stream(mut stream: UnixStream, response: &DaemonResponse) -> Result<()> {
+    pub async fn write_response_to_stream(
+        mut stream: UnixStream,
+        response: &DaemonResponse,
+    ) -> Result<()> {
         let response_json = Self::serialize_response(response)?;
-        stream.write_all(response_json.as_bytes()).await.map_err(|e| {
-            RunceptError::ConnectionError(format!("Failed to send response: {e}"))
-        })?;
+        stream
+            .write_all(response_json.as_bytes())
+            .await
+            .map_err(|e| RunceptError::ConnectionError(format!("Failed to send response: {e}")))?;
         Ok(())
     }
 }
@@ -142,7 +145,10 @@ mod tests {
         let invalid_json = "{ invalid json }";
         let result = ConnectionHandler::parse_request(invalid_json);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RunceptError::SerializationError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RunceptError::SerializationError(_)
+        ));
     }
 
     #[test]
@@ -150,7 +156,7 @@ mod tests {
         let response = DaemonResponse::ProcessList(vec![]);
         let result = ConnectionHandler::serialize_response(&response);
         assert!(result.is_ok());
-        
+
         let json = result.unwrap();
         assert!(json.contains("ProcessList"));
         assert!(json.ends_with('\n'));
@@ -163,7 +169,7 @@ mod tests {
         };
         let result = ConnectionHandler::serialize_response(&response);
         assert!(result.is_ok());
-        
+
         let json = result.unwrap();
         assert!(json.contains("Error"));
         assert!(json.contains("Test error"));

@@ -689,7 +689,9 @@ impl ProcessConfigurationManager {
     }
 
     fn environment_not_active_error(environment_id: &str) -> RunceptError {
-        RunceptError::EnvironmentError(format!("Environment '{environment_id}' is registered but not active"))
+        RunceptError::EnvironmentError(format!(
+            "Environment '{environment_id}' is registered but not active"
+        ))
     }
 
     fn process_not_found_error(process_name: &str) -> RunceptError {
@@ -713,7 +715,7 @@ mod tests {
     #[test]
     fn test_validate_health_check_url() {
         // Test the static validation methods that don't require a full config manager
-        
+
         // Valid URLs
         assert!(validate_health_check_url_static("http://localhost:8080/health").is_ok());
         assert!(validate_health_check_url_static("https://example.com/status").is_ok());
@@ -790,9 +792,11 @@ mod tests {
     fn test_is_command_available() {
         // Test with a command that should exist on most systems
         assert!(ProcessConfigurationManager::is_command_available("echo"));
-        
+
         // Test with a command that should not exist
-        assert!(!ProcessConfigurationManager::is_command_available("definitely_not_a_real_command_12345"));
+        assert!(!ProcessConfigurationManager::is_command_available(
+            "definitely_not_a_real_command_12345"
+        ));
     }
 
     #[test]

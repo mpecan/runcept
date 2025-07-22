@@ -1,24 +1,41 @@
 use crate::cli::commands::{DaemonResponse, EnvironmentStatusResponse};
-use crate::config::{EnvironmentManager, GlobalConfig, ProjectConfig};
-use crate::daemon::handlers::process::DefaultProcessHandles;
+use crate::config::{EnvironmentManager, EnvironmentManagerTrait, GlobalConfig, ProjectConfig};
 use crate::error::{Result, RunceptError};
+use crate::process::ProcessOrchestrationTrait;
 use crate::scheduler::InactivityScheduler;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Handles for environment-related operations
-#[derive(Clone)]
-pub struct EnvironmentHandles {
-        process_handles: DefaultProcessHandles,    environment_manager: Arc<RwLock<EnvironmentManager>>,
+pub struct EnvironmentHandles<P: ProcessOrchestrationTrait, E: EnvironmentManagerTrait> {
+    process_handles: crate::daemon::handlers::process::ProcessHandles<P>,
+    environment_manager: Arc<RwLock<E>>,
     inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
     current_environment_id: Arc<RwLock<Option<String>>>,
     global_config: GlobalConfig,
 }
 
-impl EnvironmentHandles {
+impl<P: ProcessOrchestrationTrait, E: EnvironmentManagerTrait> Clone for EnvironmentHandles<P, E> {
+    fn clone(&self) -> Self {
+        Self {
+            process_handles: self.process_handles.clone(),
+            environment_manager: Arc::clone(&self.environment_manager),
+            inactivity_scheduler: Arc::clone(&self.inactivity_scheduler),
+            current_environment_id: Arc::clone(&self.current_environment_id),
+            global_config: self.global_config.clone(),
+        }
+    }
+}
+
+/// Type alias for the default EnvironmentHandles implementation
+pub type DefaultEnvironmentHandles =
+    EnvironmentHandles<crate::process::DefaultProcessOrchestrationService, EnvironmentManager>;
+
+impl<P: ProcessOrchestrationTrait, E: EnvironmentManagerTrait> EnvironmentHandles<P, E> {
     pub fn new(
-    process_handles: DefaultProcessHandles,        environment_manager: Arc<RwLock<EnvironmentManager>>,
+        process_handles: crate::daemon::handlers::process::ProcessHandles<P>,
+        environment_manager: Arc<RwLock<E>>,
         inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
         current_environment_id: Arc<RwLock<Option<String>>>,
         global_config: GlobalConfig,
@@ -113,7 +130,7 @@ impl EnvironmentHandles {
         let (active_environment, project_path) = if let Some(env_id) = &current_env_id {
             if let Some(env) = env_manager.get_environment(env_id) {
                 (
-                    Some(env.name.clone()),
+                    Some(env.name),
                     Some(env.project_path.to_string_lossy().to_string()),
                 )
             } else {
@@ -193,6 +210,238 @@ impl EnvironmentHandles {
             Err(e) => Ok(DaemonResponse::Error {
                 error: format!("Failed to create configuration file: {e}"),
             }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::MockEnvironmentManagerTrait;
+    use crate::process::MockProcessOrchestrationTrait;
+    use mockall::predicate::*;
+
+    #[tokio::test]
+    async fn test_activate_environment_success() {
+        let mut mock_process_service = MockProcessOrchestrationTrait::new();
+        mock_process_service
+            .expect_get_environment_process_summary()
+            .returning(|_| Ok((vec![], 0, 0)));
+
+        let process_handles = crate::daemon::handlers::process::ProcessHandles::new(
+            Arc::new(RwLock::new(mock_process_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let mut mock_env_manager = MockEnvironmentManagerTrait::new();
+        mock_env_manager
+            .expect_activate_environment_at_path()
+            .with(function(|path: &std::path::Path| {
+                path.to_string_lossy().contains("test")
+            }))
+            .times(1)
+            .returning(|_| Ok("test-env-123".to_string()));
+
+        let handles = EnvironmentHandles::new(
+            process_handles,
+            Arc::new(RwLock::new(mock_env_manager)),
+            Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(None)),
+            GlobalConfig::default(),
+        );
+
+        let result = handles
+            .activate_environment(Some("/tmp/test".to_string()))
+            .await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Success { message } => {
+                assert!(message.contains("Environment activated"));
+            }
+            _ => panic!("Expected Success response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_activate_environment_failure() {
+        let mut mock_process_service = MockProcessOrchestrationTrait::new();
+        mock_process_service
+            .expect_get_environment_process_summary()
+            .returning(|_| Ok((vec![], 0, 0)));
+
+        let process_handles = crate::daemon::handlers::process::ProcessHandles::new(
+            Arc::new(RwLock::new(mock_process_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let mut mock_env_manager = MockEnvironmentManagerTrait::new();
+        mock_env_manager
+            .expect_activate_environment_at_path()
+            .with(function(|path: &std::path::Path| {
+                path.to_string_lossy().contains("test")
+            }))
+            .times(1)
+            .returning(|_| Err(RunceptError::EnvironmentError("Mock failure".to_string())));
+
+        let handles = EnvironmentHandles::new(
+            process_handles,
+            Arc::new(RwLock::new(mock_env_manager)),
+            Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(None)),
+            GlobalConfig::default(),
+        );
+
+        let result = handles
+            .activate_environment(Some("/tmp/test".to_string()))
+            .await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Error { error } => {
+                assert!(error.contains("Failed to activate environment"));
+            }
+            _ => panic!("Expected Error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deactivate_environment_success() {
+        let mock_process_service = MockProcessOrchestrationTrait::new();
+        let process_handles = crate::daemon::handlers::process::ProcessHandles::new(
+            Arc::new(RwLock::new(mock_process_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let mut mock_env_manager = MockEnvironmentManagerTrait::new();
+        mock_env_manager
+            .expect_deactivate_environment_and_unwatch()
+            .with(eq("test-env"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let handles = EnvironmentHandles::new(
+            process_handles,
+            Arc::new(RwLock::new(mock_env_manager)),
+            Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+            GlobalConfig::default(),
+        );
+
+        let result = handles.deactivate_environment().await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Success { message } => {
+                assert_eq!(message, "Environment deactivated");
+            }
+            _ => panic!("Expected Success response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deactivate_environment_no_active() {
+        let mock_process_service = MockProcessOrchestrationTrait::new();
+        let process_handles = crate::daemon::handlers::process::ProcessHandles::new(
+            Arc::new(RwLock::new(mock_process_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let mock_env_manager = MockEnvironmentManagerTrait::new();
+        let handles = EnvironmentHandles::new(
+            process_handles,
+            Arc::new(RwLock::new(mock_env_manager)),
+            Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(None)), // No active environment
+            GlobalConfig::default(),
+        );
+
+        let result = handles.deactivate_environment().await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Error { error } => {
+                assert_eq!(error, "No active environment");
+            }
+            _ => panic!("Expected Error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_init_project_success() {
+        use tempfile::TempDir;
+
+        let mock_process_service = MockProcessOrchestrationTrait::new();
+        let process_handles = crate::daemon::handlers::process::ProcessHandles::new(
+            Arc::new(RwLock::new(mock_process_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let mock_env_manager = MockEnvironmentManagerTrait::new();
+        let handles = EnvironmentHandles::new(
+            process_handles,
+            Arc::new(RwLock::new(mock_env_manager)),
+            Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(None)),
+            GlobalConfig::default(),
+        );
+
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        let result = handles
+            .init_project(Some(project_path.clone()), false)
+            .await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Success { message } => {
+                assert!(message.contains("Initialized new runcept project"));
+            }
+            _ => panic!("Expected Success response"),
+        }
+
+        // Verify config file was created
+        let config_path = temp_dir.path().join(".runcept.toml");
+        assert!(config_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_init_project_already_exists() {
+        use tempfile::TempDir;
+
+        let mock_process_service = MockProcessOrchestrationTrait::new();
+        let process_handles = crate::daemon::handlers::process::ProcessHandles::new(
+            Arc::new(RwLock::new(mock_process_service)),
+            Arc::new(RwLock::new(Some("test-env".to_string()))),
+        );
+
+        let mock_env_manager = MockEnvironmentManagerTrait::new();
+        let handles = EnvironmentHandles::new(
+            process_handles,
+            Arc::new(RwLock::new(mock_env_manager)),
+            Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(None)),
+            GlobalConfig::default(),
+        );
+
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create config file first
+        let config_path = temp_dir.path().join(".runcept.toml");
+        tokio::fs::write(&config_path, "# existing config")
+            .await
+            .unwrap();
+
+        let result = handles.init_project(Some(project_path), false).await;
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            DaemonResponse::Error { error } => {
+                assert!(error.contains("Configuration file already exists"));
+            }
+            _ => panic!("Expected Error response"),
         }
     }
 }

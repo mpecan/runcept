@@ -1,50 +1,3 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::database::Database;
-
-    #[tokio::test]
-    async fn test_migration_manager_creation() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        let manager = MigrationManager::new(db.get_pool());
-        assert!(!manager.pool.is_closed());
-    }
-
-    #[tokio::test]
-    async fn test_get_current_version() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = MigrationManager::new(db.get_pool());
-        let version = manager.get_current_version().await;
-        assert!(version.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_migration_info() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = MigrationManager::new(db.get_pool());
-        let info = manager.get_migration_info().await;
-        assert!(info.is_ok());
-
-        let migrations = info.unwrap();
-        assert!(!migrations.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_validate_schema() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = MigrationManager::new(db.get_pool());
-        let is_valid = manager.validate_schema().await;
-        assert!(is_valid.is_ok());
-        assert!(is_valid.unwrap());
-    }
-}
-
 use crate::error::Result;
 use sqlx::{Pool, Row, Sqlite};
 
@@ -150,5 +103,52 @@ impl<'a> MigrationManager<'a> {
             .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::Database;
+
+    #[tokio::test]
+    async fn test_migration_manager_creation() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        let manager = MigrationManager::new(db.get_pool());
+        assert!(!manager.pool.is_closed());
+    }
+
+    #[tokio::test]
+    async fn test_get_current_version() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = MigrationManager::new(db.get_pool());
+        let version = manager.get_current_version().await;
+        assert!(version.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_migration_info() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = MigrationManager::new(db.get_pool());
+        let info = manager.get_migration_info().await;
+        assert!(info.is_ok());
+
+        let migrations = info.unwrap();
+        assert!(!migrations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_validate_schema() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = MigrationManager::new(db.get_pool());
+        let is_valid = manager.validate_schema().await;
+        assert!(is_valid.is_ok());
+        assert!(is_valid.unwrap());
     }
 }

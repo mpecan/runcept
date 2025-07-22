@@ -55,7 +55,10 @@ impl<H: HealthCheckTrait> HealthMonitor<H> {
             ));
         }
         *is_running = true;
-        info!("Health monitor started with interval {:?}", self.check_interval);
+        info!(
+            "Health monitor started with interval {:?}",
+            self.check_interval
+        );
         Ok(())
     }
 
@@ -120,7 +123,10 @@ impl<H: HealthCheckTrait> HealthMonitor<H> {
 
         // Only check if process is running
         if process.status != ProcessStatus::Running {
-            debug!("Skipping health check for non-running process '{}'", process.name);
+            debug!(
+                "Skipping health check for non-running process '{}'",
+                process.name
+            );
             return Ok(true);
         }
 
@@ -132,14 +138,17 @@ impl<H: HealthCheckTrait> HealthMonitor<H> {
         )?;
 
         // Execute health check
-        let result = self.health_check_service.execute_health_check(&config).await?;
+        let result = self
+            .health_check_service
+            .execute_health_check(&config)
+            .await?;
 
         // Update health status
         let mut health_status = self.health_status.write().await;
         if let Some(status) = health_status.get_mut(&process.id) {
             status.last_check = Instant::now();
             status.last_result = Some(result.clone());
-            
+
             if result.success {
                 if !status.is_healthy {
                     info!("Process '{}' health check recovered", process.name);
@@ -151,12 +160,17 @@ impl<H: HealthCheckTrait> HealthMonitor<H> {
                 status.is_healthy = false;
                 status.consecutive_failures += 1;
                 status.error_message = Some(result.message.clone());
-                
+
                 if status.consecutive_failures == 1 {
-                    warn!("Process '{}' health check failed: {}", process.name, result.message);
+                    warn!(
+                        "Process '{}' health check failed: {}",
+                        process.name, result.message
+                    );
                 } else {
-                    warn!("Process '{}' health check failed {} times consecutively", 
-                          process.name, status.consecutive_failures);
+                    warn!(
+                        "Process '{}' health check failed {} times consecutively",
+                        process.name, status.consecutive_failures
+                    );
                 }
             }
         }
@@ -182,22 +196,23 @@ impl<H: HealthCheckTrait> HealthMonitor<H> {
         F: Fn() -> Vec<Process> + Send + Sync,
     {
         let mut interval = interval(self.check_interval);
-        
+
         while self.is_running().await {
             interval.tick().await;
-            
+
             let processes = get_processes();
             for process in processes {
                 if let Err(e) = self.check_process_health(&process).await {
-                    error!("Failed to check health for process '{}': {}", process.name, e);
+                    error!(
+                        "Failed to check health for process '{}': {}",
+                        process.name, e
+                    );
                 }
             }
         }
-        
+
         Ok(())
     }
-
-
 }
 
 #[cfg(test)]
@@ -215,11 +230,11 @@ mod tests {
             "/tmp".to_string(),
             "test-env".to_string(),
         );
-        
+
         if let Some(url) = health_check_url {
             process.set_health_check(url, 30);
         }
-        
+
         // Transition to running state
         process.transition_to(ProcessStatus::Starting);
         process.transition_to(ProcessStatus::Running);
@@ -230,21 +245,21 @@ mod tests {
     async fn test_health_monitor_lifecycle() {
         let mock_health = Arc::new(MockHealthCheckService::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         // Initially not running
         assert!(!monitor.is_running().await);
-        
+
         // Start monitor
         monitor.start().await.unwrap();
         assert!(monitor.is_running().await);
-        
+
         // Cannot start again
         assert!(monitor.start().await.is_err());
-        
+
         // Stop monitor
         monitor.stop().await.unwrap();
         assert!(!monitor.is_running().await);
-        
+
         // Cannot stop again
         assert!(monitor.stop().await.is_err());
     }
@@ -253,20 +268,20 @@ mod tests {
     async fn test_add_remove_process() {
         let mock_health = Arc::new(MockHealthCheckService::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         let process = create_test_process("test", Some("http://localhost:8080/health".to_string()));
-        
+
         // Add process
         monitor.add_process(&process).await.unwrap();
-        
+
         // Check it was added
         let status = monitor.get_health_status(&process.id).await;
         assert!(status.is_some());
         assert!(status.unwrap().is_healthy);
-        
+
         // Remove process
         monitor.remove_process(&process.id).await.unwrap();
-        
+
         // Check it was removed
         let status = monitor.get_health_status(&process.id).await;
         assert!(status.is_none());
@@ -276,16 +291,16 @@ mod tests {
     async fn test_process_without_health_check() {
         let mock_health = Arc::new(MockHealthCheckService::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         let process = create_test_process("test", None);
-        
+
         // Add process without health check
         monitor.add_process(&process).await.unwrap();
-        
+
         // Should not be in health status map
         let status = monitor.get_health_status(&process.id).await;
         assert!(status.is_none());
-        
+
         // Health check should return true (healthy by default)
         let is_healthy = monitor.check_process_health(&process).await.unwrap();
         assert!(is_healthy);
@@ -295,15 +310,15 @@ mod tests {
     async fn test_tcp_health_check() {
         let mock_health = Arc::new(MockHealthCheckService::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         let process = create_test_process("test", Some("tcp://127.0.0.1:22".to_string()));
-        
+
         monitor.add_process(&process).await.unwrap();
-        
+
         // This should succeed with mock
         let result = monitor.check_process_health(&process).await.unwrap();
         assert!(result);
-        
+
         // Check that status was updated
         let status = monitor.get_health_status(&process.id).await;
         assert!(status.is_some());
@@ -314,14 +329,14 @@ mod tests {
     async fn test_command_health_check() {
         let mock_health = Arc::new(MockHealthCheckService::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         let process = create_test_process("test", Some("cmd://echo 'healthy'".to_string()));
-        
+
         monitor.add_process(&process).await.unwrap();
-        
+
         let is_healthy = monitor.check_process_health(&process).await.unwrap();
         assert!(is_healthy);
-        
+
         let status = monitor.get_health_status(&process.id).await.unwrap();
         assert!(status.is_healthy);
         assert_eq!(status.consecutive_failures, 0);
@@ -332,14 +347,14 @@ mod tests {
         // Configure mock to return failure
         let mock_health = Arc::new(MockHealthCheckService::new().with_success(false));
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         let process = create_test_process("test", Some("cmd://exit 1".to_string()));
-        
+
         monitor.add_process(&process).await.unwrap();
-        
+
         let is_healthy = monitor.check_process_health(&process).await.unwrap();
         assert!(!is_healthy);
-        
+
         let status = monitor.get_health_status(&process.id).await.unwrap();
         assert!(!status.is_healthy);
         assert_eq!(status.consecutive_failures, 1);
@@ -350,13 +365,13 @@ mod tests {
     async fn test_get_all_health_status() {
         let mock_health = Arc::new(MockHealthCheckService::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         let process1 = create_test_process("test1", Some("cmd://echo 'healthy'".to_string()));
         let process2 = create_test_process("test2", Some("cmd://echo 'healthy'".to_string()));
-        
+
         monitor.add_process(&process1).await.unwrap();
         monitor.add_process(&process2).await.unwrap();
-        
+
         let all_status = monitor.get_all_health_status().await;
         assert_eq!(all_status.len(), 2);
         assert!(all_status.contains_key(&process1.id));
@@ -367,12 +382,12 @@ mod tests {
     async fn test_non_running_process_health_check() {
         let mock_health = Arc::new(MockHealthCheckService::new());
         let monitor = HealthMonitor::new(Duration::from_secs(1), mock_health);
-        
+
         let mut process = create_test_process("test", Some("cmd://echo 'healthy'".to_string()));
         process.transition_to(ProcessStatus::Stopped);
-        
+
         monitor.add_process(&process).await.unwrap();
-        
+
         // Should return true (healthy) for non-running processes
         let is_healthy = monitor.check_process_health(&process).await.unwrap();
         assert!(is_healthy);

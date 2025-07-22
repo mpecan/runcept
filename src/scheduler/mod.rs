@@ -1,5 +1,5 @@
-mod inactivity;
 mod health;
+mod inactivity;
 
-pub use inactivity::*;
 pub use health::*;
+pub use inactivity::*;

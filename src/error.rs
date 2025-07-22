@@ -1,51 +1,3 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_process_error_creation() {
-        let error = RunceptError::ProcessError("test process error".to_string());
-        assert_eq!(error.to_string(), "Process error: test process error");
-    }
-
-    #[test]
-    fn test_config_error_creation() {
-        let error = RunceptError::ConfigError("invalid config".to_string());
-        assert_eq!(error.to_string(), "Configuration error: invalid config");
-    }
-
-    #[test]
-    fn test_database_error_creation() {
-        let error = RunceptError::DatabaseError("connection failed".to_string());
-        assert_eq!(error.to_string(), "Database error: connection failed");
-    }
-
-    #[test]
-    fn test_io_error_conversion() {
-        let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let runcept_error: RunceptError = io_error.into();
-        assert!(matches!(runcept_error, RunceptError::IoError(_)));
-    }
-
-    #[test]
-    fn test_toml_error_conversion() {
-        let invalid_toml = "invalid = [toml";
-        let toml_error = toml::from_str::<toml::Value>(invalid_toml).unwrap_err();
-        let runcept_error: RunceptError = toml_error.into();
-        assert!(matches!(runcept_error, RunceptError::ConfigError(_)));
-    }
-
-    #[test]
-    fn test_error_is_retriable() {
-        let io_error =
-            RunceptError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
-        assert!(io_error.is_retriable());
-
-        let config_error = RunceptError::ConfigError("test".to_string());
-        assert!(!config_error.is_retriable());
-    }
-}
-
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -139,3 +91,50 @@ impl RunceptError {
 }
 
 pub type Result<T> = std::result::Result<T, RunceptError>;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_process_error_creation() {
+        let error = RunceptError::ProcessError("test process error".to_string());
+        assert_eq!(error.to_string(), "Process error: test process error");
+    }
+
+    #[test]
+    fn test_config_error_creation() {
+        let error = RunceptError::ConfigError("invalid config".to_string());
+        assert_eq!(error.to_string(), "Configuration error: invalid config");
+    }
+
+    #[test]
+    fn test_database_error_creation() {
+        let error = RunceptError::DatabaseError("connection failed".to_string());
+        assert_eq!(error.to_string(), "Database error: connection failed");
+    }
+
+    #[test]
+    fn test_io_error_conversion() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let runcept_error: RunceptError = io_error.into();
+        assert!(matches!(runcept_error, RunceptError::IoError(_)));
+    }
+
+    #[test]
+    fn test_toml_error_conversion() {
+        let invalid_toml = "invalid = [toml";
+        let toml_error = toml::from_str::<toml::Value>(invalid_toml).unwrap_err();
+        let runcept_error: RunceptError = toml_error.into();
+        assert!(matches!(runcept_error, RunceptError::ConfigError(_)));
+    }
+
+    #[test]
+    fn test_error_is_retriable() {
+        let io_error =
+            RunceptError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "test"));
+        assert!(io_error.is_retriable());
+
+        let config_error = RunceptError::ConfigError("test".to_string());
+        assert!(!config_error.is_retriable());
+    }
+}

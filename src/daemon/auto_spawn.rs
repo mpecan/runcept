@@ -203,10 +203,10 @@ mod tests {
         // This will likely fail because the daemon isn't actually running,
         // but we can test that the function exists and handles the error gracefully
         let result = ensure_daemon_running_for_cli(socket_path, true).await;
-        
+
         // We expect this to fail since no daemon is running
         assert!(result.is_err());
-        
+
         // The error should be related to connection or process spawning
         match result.unwrap_err() {
             RunceptError::ConnectionError(_) | RunceptError::ProcessError(_) => {
@@ -224,10 +224,10 @@ mod tests {
         // This will likely fail because the daemon isn't actually running,
         // but we can test that the function exists and handles the error gracefully
         let result = ensure_daemon_running_for_mcp(socket_path).await;
-        
+
         // We expect this to fail since no daemon is running
         assert!(result.is_err());
-        
+
         // The error should be related to connection or process spawning
         match result.unwrap_err() {
             RunceptError::ConnectionError(_) | RunceptError::ProcessError(_) => {

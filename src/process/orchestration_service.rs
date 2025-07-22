@@ -4,7 +4,8 @@ use crate::error::{Result, RunceptError};
 use crate::process::configuration::ProcessConfigurationManager;
 use crate::process::{
     DefaultHealthCheckService, DefaultProcessRuntime, HealthCheckTrait, LogEntry,
-    ProcessExecutionService, ProcessOrchestrationTrait, ProcessRepositoryTrait, ProcessRuntimeTrait,
+    ProcessExecutionService, ProcessOrchestrationTrait, ProcessRepositoryTrait,
+    ProcessRuntimeTrait,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -612,11 +613,17 @@ where
             .await
     }
 
-    async fn list_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>> {
+    async fn list_processes_for_environment(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<ProcessInfo>> {
         self.list_processes_for_environment(environment_id).await
     }
 
-    async fn get_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>> {
+    async fn get_processes_for_environment(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<ProcessInfo>> {
         self.get_processes_for_environment(environment_id).await
     }
 
@@ -628,8 +635,7 @@ where
     }
 
     async fn stop_all_processes_in_environment(&mut self, environment_id: &str) -> Result<()> {
-        self.stop_all_processes_in_environment(environment_id)
-            .await
+        self.stop_all_processes_in_environment(environment_id).await
     }
 }
 

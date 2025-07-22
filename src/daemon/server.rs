@@ -1,7 +1,9 @@
 use crate::cli::commands::{DaemonRequest, DaemonResponse};
 use crate::config::{EnvironmentManager, GlobalConfig};
 use crate::daemon::connection::ConnectionHandler;
-use crate::daemon::handlers::{DaemonHandles, EnvironmentHandles, process::DefaultProcessHandles};
+use crate::daemon::handlers::{
+    DaemonHandles, environment::DefaultEnvironmentHandles, process::DefaultProcessHandles,
+};
 use crate::database::Database;
 use crate::error::{Result, RunceptError};
 use crate::process::DefaultProcessOrchestrationService;
@@ -153,7 +155,7 @@ impl DaemonServer {
             self.current_environment_id.clone(),
         );
 
-        let environment_handles = EnvironmentHandles::new(
+        let environment_handles = DefaultEnvironmentHandles::new(
             process_handles.clone(),
             self.environment_manager.clone(),
             self.inactivity_scheduler.clone(),
@@ -300,7 +302,7 @@ impl DaemonServer {
 #[derive(Clone)]
 struct RequestProcessor {
     process_handles: DefaultProcessHandles,
-    environment_handles: EnvironmentHandles,
+    environment_handles: DefaultEnvironmentHandles,
     daemon_handles: DaemonHandles,
 }
 

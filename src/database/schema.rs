@@ -1,3 +1,52 @@
+use crate::error::Result;
+use sqlx::{Pool, Sqlite, SqlitePool, migrate::MigrateDatabase};
+
+pub struct Database {
+    pub pool: Pool<Sqlite>,
+}
+
+impl Database {
+    pub async fn new(database_url: &str) -> Result<Self> {
+        // Create database file if it doesn't exist (for file-based databases)
+        if !database_url.contains("memory") && !Sqlite::database_exists(database_url).await? {
+            Sqlite::create_database(database_url).await?;
+        }
+
+        let pool = SqlitePool::connect(database_url).await?;
+        Ok(Database { pool })
+    }
+
+    pub async fn init(&self) -> Result<()> {
+        self.run_migrations().await?;
+        Ok(())
+    }
+
+    pub async fn close(self) -> Result<()> {
+        self.pool.close().await;
+        Ok(())
+    }
+
+    pub async fn health_check(&self) -> Result<bool> {
+        let result = sqlx::query("SELECT 1").fetch_one(&self.pool).await;
+
+        match result {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                tracing::error!("Database health check failed: {}", e);
+                Ok(false)
+            }
+        }
+    }
+
+    pub async fn run_migrations(&self) -> Result<()> {
+        sqlx::migrate!("./migrations").run(&self.pool).await?;
+        Ok(())
+    }
+
+    pub fn get_pool(&self) -> &Pool<Sqlite> {
+        &self.pool
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,55 +124,5 @@ mod tests {
         .fetch_one(&db.pool)
         .await;
         assert!(result.is_ok());
-    }
-}
-
-use crate::error::Result;
-use sqlx::{Pool, Sqlite, SqlitePool, migrate::MigrateDatabase};
-
-pub struct Database {
-    pub pool: Pool<Sqlite>,
-}
-
-impl Database {
-    pub async fn new(database_url: &str) -> Result<Self> {
-        // Create database file if it doesn't exist (for file-based databases)
-        if !database_url.contains("memory") && !Sqlite::database_exists(database_url).await? {
-            Sqlite::create_database(database_url).await?;
-        }
-
-        let pool = SqlitePool::connect(database_url).await?;
-        Ok(Database { pool })
-    }
-
-    pub async fn init(&self) -> Result<()> {
-        self.run_migrations().await?;
-        Ok(())
-    }
-
-    pub async fn close(self) -> Result<()> {
-        self.pool.close().await;
-        Ok(())
-    }
-
-    pub async fn health_check(&self) -> Result<bool> {
-        let result = sqlx::query("SELECT 1").fetch_one(&self.pool).await;
-
-        match result {
-            Ok(_) => Ok(true),
-            Err(e) => {
-                tracing::error!("Database health check failed: {}", e);
-                Ok(false)
-            }
-        }
-    }
-
-    pub async fn run_migrations(&self) -> Result<()> {
-        sqlx::migrate!("./migrations").run(&self.pool).await?;
-        Ok(())
-    }
-
-    pub fn get_pool(&self) -> &Pool<Sqlite> {
-        &self.pool
     }
 }

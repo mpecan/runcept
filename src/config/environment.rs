@@ -319,6 +319,7 @@ use crate::config::{
 use crate::database::{ProcessRepository, QueryManager};
 use crate::error::{Result, RunceptError};
 use crate::process::Process;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Sqlite};
@@ -326,6 +327,24 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Trait for environment management operations
+///
+/// This trait abstracts the environment management operations,
+/// enabling testing with mock implementations and providing a clean
+/// interface for environment lifecycle management.
+#[cfg_attr(test, mockall::automock)]
+#[async_trait]
+pub trait EnvironmentManagerTrait: Send + Sync {
+    /// Activate an environment at the specified path
+    async fn activate_environment_at_path(&mut self, project_path: &Path) -> Result<String>;
+
+    /// Deactivate an environment and stop watching its configuration
+    async fn deactivate_environment_and_unwatch(&mut self, env_id: &str) -> Result<()>;
+
+    /// Get an environment by ID
+    fn get_environment(&self, env_id: &str) -> Option<Environment>;
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EnvironmentStatus {
@@ -1122,5 +1141,20 @@ impl EnvironmentManager {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl EnvironmentManagerTrait for EnvironmentManager {
+    async fn activate_environment_at_path(&mut self, project_path: &Path) -> Result<String> {
+        self.activate_environment_at_path(project_path).await
+    }
+
+    async fn deactivate_environment_and_unwatch(&mut self, env_id: &str) -> Result<()> {
+        self.deactivate_environment_and_unwatch(env_id).await
+    }
+
+    fn get_environment(&self, env_id: &str) -> Option<Environment> {
+        self.get_environment(env_id).cloned()
     }
 }

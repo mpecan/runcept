@@ -1,83 +1,3 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::database::Database;
-
-    #[tokio::test]
-    async fn test_query_manager_creation() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = QueryManager::new(db.get_pool());
-        assert!(!manager.pool.is_closed());
-    }
-
-    #[tokio::test]
-    async fn test_table_exists() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = QueryManager::new(db.get_pool());
-
-        let exists = manager.table_exists("processes").await.unwrap();
-        assert!(exists);
-
-        let exists = manager.table_exists("nonexistent_table").await.unwrap();
-        assert!(!exists);
-    }
-
-    #[tokio::test]
-    async fn test_count_records() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = QueryManager::new(db.get_pool());
-
-        let count = manager.count_records("processes").await.unwrap();
-        assert_eq!(count, 0);
-
-        let count = manager.count_records("environments").await.unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[tokio::test]
-    async fn test_get_database_info() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = QueryManager::new(db.get_pool());
-        let info = manager.get_database_info().await.unwrap();
-
-        assert!(info.contains_key("processes"));
-        assert!(info.contains_key("environments"));
-        assert_eq!(info["processes"], 0);
-        assert_eq!(info["environments"], 0);
-    }
-
-    #[tokio::test]
-    async fn test_cleanup_old_activity_logs() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = QueryManager::new(db.get_pool());
-
-        // After migration 002, activity_logs table shouldn't exist
-        // The cleanup method should handle this gracefully and return 0
-        let deleted = manager.cleanup_old_activity_logs(7).await.unwrap();
-        assert_eq!(deleted, 0); // No table, no rows deleted
-    }
-
-    #[tokio::test]
-    async fn test_vacuum_database() {
-        let db = Database::new("sqlite::memory:").await.unwrap();
-        db.init().await.unwrap();
-
-        let manager = QueryManager::new(db.get_pool());
-        let result = manager.vacuum_database().await;
-        assert!(result.is_ok());
-    }
-}
-
 use crate::config::environment::{Environment, EnvironmentStatus};
 use crate::config::project::ProjectConfig;
 use crate::error::Result;
@@ -539,5 +459,85 @@ impl<'a> QueryManager<'a> {
             project_config: project_config.clone(),
             merged_config: project_config, // For now, same as project_config
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::Database;
+
+    #[tokio::test]
+    async fn test_query_manager_creation() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = QueryManager::new(db.get_pool());
+        assert!(!manager.pool.is_closed());
+    }
+
+    #[tokio::test]
+    async fn test_table_exists() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = QueryManager::new(db.get_pool());
+
+        let exists = manager.table_exists("processes").await.unwrap();
+        assert!(exists);
+
+        let exists = manager.table_exists("nonexistent_table").await.unwrap();
+        assert!(!exists);
+    }
+
+    #[tokio::test]
+    async fn test_count_records() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = QueryManager::new(db.get_pool());
+
+        let count = manager.count_records("processes").await.unwrap();
+        assert_eq!(count, 0);
+
+        let count = manager.count_records("environments").await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_database_info() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = QueryManager::new(db.get_pool());
+        let info = manager.get_database_info().await.unwrap();
+
+        assert!(info.contains_key("processes"));
+        assert!(info.contains_key("environments"));
+        assert_eq!(info["processes"], 0);
+        assert_eq!(info["environments"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_old_activity_logs() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = QueryManager::new(db.get_pool());
+
+        // After migration 002, activity_logs table shouldn't exist
+        // The cleanup method should handle this gracefully and return 0
+        let deleted = manager.cleanup_old_activity_logs(7).await.unwrap();
+        assert_eq!(deleted, 0); // No table, no rows deleted
+    }
+
+    #[tokio::test]
+    async fn test_vacuum_database() {
+        let db = Database::new("sqlite::memory:").await.unwrap();
+        db.init().await.unwrap();
+
+        let manager = QueryManager::new(db.get_pool());
+        let result = manager.vacuum_database().await;
+        assert!(result.is_ok());
     }
 }

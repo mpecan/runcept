@@ -1,3 +1,214 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ProcessStatus {
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+    Failed,
+    Crashed,
+}
+
+impl fmt::Display for ProcessStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status_str = match self {
+            ProcessStatus::Stopped => "stopped",
+            ProcessStatus::Starting => "starting",
+            ProcessStatus::Running => "running",
+            ProcessStatus::Stopping => "stopping",
+            ProcessStatus::Failed => "failed",
+            ProcessStatus::Crashed => "crashed",
+        };
+        write!(f, "{status_str}")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Process {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub working_dir: String,
+    pub environment_id: String,
+    pub pid: Option<u32>,
+    pub status: ProcessStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_activity: Option<DateTime<Utc>>,
+    pub auto_restart: bool,
+    pub health_check_url: Option<String>,
+    pub health_check_interval: Option<u32>, // seconds
+    pub depends_on: Vec<String>,
+    pub env_vars: HashMap<String, String>,
+}
+
+impl Process {
+    pub fn new(name: String, command: String, working_dir: String, environment_id: String) -> Self {
+        let now = Utc::now();
+
+        Self {
+            id: format!("{environment_id}:{name}"),
+            name,
+            command,
+            working_dir,
+            environment_id,
+            pid: None,
+            status: ProcessStatus::Stopped,
+            created_at: now,
+            updated_at: now,
+            last_activity: None,
+            auto_restart: false,
+            health_check_url: None,
+            health_check_interval: None,
+            depends_on: Vec::new(),
+            env_vars: HashMap::new(),
+        }
+    }
+
+    /// Create a Process from a ProcessDefinition with proper ID generation
+    /// This is the preferred way to create processes from configuration
+    pub fn from_definition(
+        definition: &crate::config::ProcessDefinition,
+        working_dir: String,
+        environment_id: String,
+    ) -> Self {
+        let now = Utc::now();
+
+        Self {
+            id: format!("{environment_id}:{}", definition.name),
+            name: definition.name.clone(),
+            command: definition.command.clone(),
+            working_dir,
+            environment_id,
+            pid: None,
+            status: ProcessStatus::Stopped,
+            created_at: now,
+            updated_at: now,
+            last_activity: None,
+            auto_restart: definition.auto_restart.unwrap_or(false),
+            health_check_url: definition.health_check_url.clone(),
+            health_check_interval: definition.health_check_interval,
+            depends_on: definition.depends_on.clone(),
+            env_vars: definition.env_vars.clone(),
+        }
+    }
+
+    pub fn transition_to(&mut self, new_status: ProcessStatus) {
+        if self.can_transition_to(&new_status) {
+            self.status = new_status;
+            self.updated_at = Utc::now();
+        }
+    }
+
+    pub fn can_transition_to(&self, new_status: &ProcessStatus) -> bool {
+        use ProcessStatus::*;
+
+        match (&self.status, new_status) {
+            // From Stopped
+            (Stopped, Starting) => true,
+            (Stopped, Failed) => true,
+
+            // From Starting
+            (Starting, Running) => true,
+            (Starting, Failed) => true,
+            (Starting, Crashed) => true,
+
+            // From Running
+            (Running, Stopping) => true,
+            (Running, Crashed) => true,
+            (Running, Failed) => true,
+
+            // From Stopping
+            (Stopping, Stopped) => true,
+            (Stopping, Failed) => true,
+
+            // From Failed
+            (Failed, Starting) => true,
+            (Failed, Stopped) => true,
+
+            // From Crashed
+            (Crashed, Starting) => true,
+            (Crashed, Stopped) => true,
+
+            // Same status
+            (status, new_status) if status == new_status => true,
+
+            // All other transitions are invalid
+            _ => false,
+        }
+    }
+
+    pub fn add_dependency(&mut self, dependency: String) {
+        if !self.depends_on.contains(&dependency) {
+            self.depends_on.push(dependency);
+            self.updated_at = Utc::now();
+        }
+    }
+
+    pub fn has_dependency(&self, dependency: &str) -> bool {
+        self.depends_on.iter().any(|dep| dep == dependency)
+    }
+
+    pub fn set_env_var(&mut self, key: String, value: String) {
+        self.env_vars.insert(key, value);
+        self.updated_at = Utc::now();
+    }
+
+    pub fn get_env_var(&self, key: &str) -> Option<&String> {
+        self.env_vars.get(key)
+    }
+
+    pub fn set_health_check(&mut self, url: String, interval_seconds: u32) {
+        self.health_check_url = Some(url);
+        self.health_check_interval = Some(interval_seconds);
+        self.updated_at = Utc::now();
+    }
+
+    pub fn update_activity(&mut self) {
+        self.last_activity = Some(Utc::now());
+        self.updated_at = Utc::now();
+    }
+
+    pub fn is_healthy_status(&self) -> bool {
+        !matches!(self.status, ProcessStatus::Failed | ProcessStatus::Crashed)
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(self.status, ProcessStatus::Running)
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        matches!(self.status, ProcessStatus::Stopped)
+    }
+
+    pub fn is_transitioning(&self) -> bool {
+        matches!(
+            self.status,
+            ProcessStatus::Starting | ProcessStatus::Stopping
+        )
+    }
+
+    pub fn set_pid(&mut self, pid: u32) {
+        self.pid = Some(pid);
+        self.updated_at = Utc::now();
+    }
+
+    pub fn clear_pid(&mut self) {
+        self.pid = None;
+        self.updated_at = Utc::now();
+    }
+}
+
+/// Handle for a running process (execution service specific)
+pub struct ExecutionProcessHandle {
+    pub child: std::sync::Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    pub shutdown_tx: tokio::sync::mpsc::Sender<()>,
+    pub logger: std::sync::Arc<tokio::sync::Mutex<crate::process::ProcessLogger>>,
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,216 +499,4 @@ mod tests {
         assert!(process.depends_on.is_empty());
         assert!(process.env_vars.is_empty());
     }
-}
-
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ProcessStatus {
-    Stopped,
-    Starting,
-    Running,
-    Stopping,
-    Failed,
-    Crashed,
-}
-
-impl fmt::Display for ProcessStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let status_str = match self {
-            ProcessStatus::Stopped => "stopped",
-            ProcessStatus::Starting => "starting",
-            ProcessStatus::Running => "running",
-            ProcessStatus::Stopping => "stopping",
-            ProcessStatus::Failed => "failed",
-            ProcessStatus::Crashed => "crashed",
-        };
-        write!(f, "{status_str}")
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Process {
-    pub id: String,
-    pub name: String,
-    pub command: String,
-    pub working_dir: String,
-    pub environment_id: String,
-    pub pid: Option<u32>,
-    pub status: ProcessStatus,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub last_activity: Option<DateTime<Utc>>,
-    pub auto_restart: bool,
-    pub health_check_url: Option<String>,
-    pub health_check_interval: Option<u32>, // seconds
-    pub depends_on: Vec<String>,
-    pub env_vars: HashMap<String, String>,
-}
-
-impl Process {
-    pub fn new(name: String, command: String, working_dir: String, environment_id: String) -> Self {
-        let now = Utc::now();
-
-        Self {
-            id: format!("{environment_id}:{name}"),
-            name,
-            command,
-            working_dir,
-            environment_id,
-            pid: None,
-            status: ProcessStatus::Stopped,
-            created_at: now,
-            updated_at: now,
-            last_activity: None,
-            auto_restart: false,
-            health_check_url: None,
-            health_check_interval: None,
-            depends_on: Vec::new(),
-            env_vars: HashMap::new(),
-        }
-    }
-
-    /// Create a Process from a ProcessDefinition with proper ID generation
-    /// This is the preferred way to create processes from configuration
-    pub fn from_definition(
-        definition: &crate::config::ProcessDefinition,
-        working_dir: String,
-        environment_id: String,
-    ) -> Self {
-        let now = Utc::now();
-
-        Self {
-            id: format!("{environment_id}:{}", definition.name),
-            name: definition.name.clone(),
-            command: definition.command.clone(),
-            working_dir,
-            environment_id,
-            pid: None,
-            status: ProcessStatus::Stopped,
-            created_at: now,
-            updated_at: now,
-            last_activity: None,
-            auto_restart: definition.auto_restart.unwrap_or(false),
-            health_check_url: definition.health_check_url.clone(),
-            health_check_interval: definition.health_check_interval,
-            depends_on: definition.depends_on.clone(),
-            env_vars: definition.env_vars.clone(),
-        }
-    }
-
-    pub fn transition_to(&mut self, new_status: ProcessStatus) {
-        if self.can_transition_to(&new_status) {
-            self.status = new_status;
-            self.updated_at = Utc::now();
-        }
-    }
-
-    pub fn can_transition_to(&self, new_status: &ProcessStatus) -> bool {
-        use ProcessStatus::*;
-
-        match (&self.status, new_status) {
-            // From Stopped
-            (Stopped, Starting) => true,
-            (Stopped, Failed) => true,
-
-            // From Starting
-            (Starting, Running) => true,
-            (Starting, Failed) => true,
-            (Starting, Crashed) => true,
-
-            // From Running
-            (Running, Stopping) => true,
-            (Running, Crashed) => true,
-            (Running, Failed) => true,
-
-            // From Stopping
-            (Stopping, Stopped) => true,
-            (Stopping, Failed) => true,
-
-            // From Failed
-            (Failed, Starting) => true,
-            (Failed, Stopped) => true,
-
-            // From Crashed
-            (Crashed, Starting) => true,
-            (Crashed, Stopped) => true,
-
-            // Same status
-            (status, new_status) if status == new_status => true,
-
-            // All other transitions are invalid
-            _ => false,
-        }
-    }
-
-    pub fn add_dependency(&mut self, dependency: String) {
-        if !self.depends_on.contains(&dependency) {
-            self.depends_on.push(dependency);
-            self.updated_at = Utc::now();
-        }
-    }
-
-    pub fn has_dependency(&self, dependency: &str) -> bool {
-        self.depends_on.iter().any(|dep| dep == dependency)
-    }
-
-    pub fn set_env_var(&mut self, key: String, value: String) {
-        self.env_vars.insert(key, value);
-        self.updated_at = Utc::now();
-    }
-
-    pub fn get_env_var(&self, key: &str) -> Option<&String> {
-        self.env_vars.get(key)
-    }
-
-    pub fn set_health_check(&mut self, url: String, interval_seconds: u32) {
-        self.health_check_url = Some(url);
-        self.health_check_interval = Some(interval_seconds);
-        self.updated_at = Utc::now();
-    }
-
-    pub fn update_activity(&mut self) {
-        self.last_activity = Some(Utc::now());
-        self.updated_at = Utc::now();
-    }
-
-    pub fn is_healthy_status(&self) -> bool {
-        !matches!(self.status, ProcessStatus::Failed | ProcessStatus::Crashed)
-    }
-
-    pub fn is_running(&self) -> bool {
-        matches!(self.status, ProcessStatus::Running)
-    }
-
-    pub fn is_stopped(&self) -> bool {
-        matches!(self.status, ProcessStatus::Stopped)
-    }
-
-    pub fn is_transitioning(&self) -> bool {
-        matches!(
-            self.status,
-            ProcessStatus::Starting | ProcessStatus::Stopping
-        )
-    }
-
-    pub fn set_pid(&mut self, pid: u32) {
-        self.pid = Some(pid);
-        self.updated_at = Utc::now();
-    }
-
-    pub fn clear_pid(&mut self) {
-        self.pid = None;
-        self.updated_at = Utc::now();
-    }
-}
-
-/// Handle for a running process (execution service specific)
-pub struct ExecutionProcessHandle {
-    pub child: std::sync::Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
-    pub shutdown_tx: tokio::sync::mpsc::Sender<()>,
-    pub logger: std::sync::Arc<tokio::sync::Mutex<crate::process::ProcessLogger>>,
 }

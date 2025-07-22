@@ -1,210 +1,3 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::GlobalConfig;
-    use crate::process::Process;
-    use std::time::Duration;
-    use tempfile::TempDir;
-    use tokio::time::Instant;
-
-    #[tokio::test]
-    async fn test_activity_tracker_creation() {
-        let tracker = ActivityTracker::new();
-        assert!(tracker.process_activities.read().await.is_empty());
-        assert!(tracker.environment_activities.read().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_record_process_activity() {
-        let tracker = ActivityTracker::new();
-        let process_id = "test-process-1".to_string();
-
-        tracker.record_process_activity(&process_id).await;
-
-        let activities = tracker.process_activities.read().await;
-        assert!(activities.contains_key(&process_id));
-        let activity = activities.get(&process_id).unwrap();
-        assert!(activity.last_activity_time.elapsed().as_secs() < 1);
-    }
-
-    #[tokio::test]
-    async fn test_record_environment_activity() {
-        let tracker = ActivityTracker::new();
-        let env_id = "test-env-1".to_string();
-
-        tracker.record_environment_activity(&env_id).await;
-
-        let activities = tracker.environment_activities.read().await;
-        assert!(activities.contains_key(&env_id));
-    }
-
-    #[tokio::test]
-    async fn test_check_process_inactivity_within_timeout() {
-        let tracker = ActivityTracker::new();
-        let process_id = "test-process-1".to_string();
-
-        tracker.record_process_activity(&process_id).await;
-
-        let is_inactive = tracker
-            .check_process_inactivity(&process_id, Duration::from_secs(10))
-            .await;
-        assert!(!is_inactive);
-    }
-
-    #[tokio::test]
-    async fn test_check_process_inactivity_beyond_timeout() {
-        let tracker = ActivityTracker::new();
-        let process_id = "test-process-1".to_string();
-
-        // Manually insert old activity
-        {
-            let mut activities = tracker.process_activities.write().await;
-            activities.insert(
-                process_id.clone(),
-                ActivityInfo {
-                    last_activity_time: Instant::now() - Duration::from_secs(20),
-                    activity_count: 1,
-                },
-            );
-        }
-
-        let is_inactive = tracker
-            .check_process_inactivity(&process_id, Duration::from_secs(10))
-            .await;
-        assert!(is_inactive);
-    }
-
-    #[tokio::test]
-    async fn test_get_all_inactive_processes() {
-        let tracker = ActivityTracker::new();
-
-        // Add active and inactive processes
-        tracker.record_process_activity("active-process").await;
-
-        {
-            let mut activities = tracker.process_activities.write().await;
-            activities.insert(
-                "inactive-process".to_string(),
-                ActivityInfo {
-                    last_activity_time: Instant::now() - Duration::from_secs(20),
-                    activity_count: 1,
-                },
-            );
-        }
-
-        let inactive = tracker
-            .get_all_inactive_processes(Duration::from_secs(10))
-            .await;
-        assert_eq!(inactive.len(), 1);
-        assert!(inactive.contains(&"inactive-process".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_cleanup_old_activities() {
-        let tracker = ActivityTracker::new();
-
-        // Add recent and old activities
-        tracker.record_process_activity("recent-process").await;
-
-        {
-            let mut activities = tracker.process_activities.write().await;
-            activities.insert(
-                "old-process".to_string(),
-                ActivityInfo {
-                    last_activity_time: Instant::now() - Duration::from_secs(7200), // 2 hours old
-                    activity_count: 1,
-                },
-            );
-        }
-
-        let cleaned = tracker
-            .cleanup_old_activities(Duration::from_secs(3600))
-            .await; // 1 hour cutoff
-        assert_eq!(cleaned, 1);
-
-        let activities = tracker.process_activities.read().await;
-        assert!(activities.contains_key("recent-process"));
-        assert!(!activities.contains_key("old-process"));
-    }
-
-    #[tokio::test]
-    async fn test_inactivity_scheduler_creation() {
-        let global_config = GlobalConfig::default();
-        let scheduler = InactivityScheduler::new(global_config);
-
-        assert!(
-            !scheduler
-                .is_running
-                .load(std::sync::atomic::Ordering::Relaxed)
-        );
-    }
-
-    #[tokio::test]
-    async fn test_inactivity_scheduler_start_stop() {
-        let global_config = GlobalConfig::default();
-        let mut scheduler = InactivityScheduler::new(global_config);
-
-        scheduler.start().await.unwrap();
-        assert!(
-            scheduler
-                .is_running
-                .load(std::sync::atomic::Ordering::Relaxed)
-        );
-
-        scheduler.stop().await.unwrap();
-        assert!(
-            !scheduler
-                .is_running
-                .load(std::sync::atomic::Ordering::Relaxed)
-        );
-    }
-
-    #[tokio::test]
-    async fn test_schedule_process_shutdown() {
-        let global_config = GlobalConfig::default();
-        let mut scheduler = InactivityScheduler::new(global_config);
-
-        let temp_dir = TempDir::new().unwrap();
-        let process = Process::new(
-            "test-process".to_string(),
-            "echo test".to_string(),
-            temp_dir.path().to_string_lossy().to_string(),
-            "env-1".to_string(),
-        );
-
-        scheduler
-            .schedule_process_shutdown(&process.id, Duration::from_millis(100))
-            .await
-            .unwrap();
-
-        let timers = scheduler.shutdown_timers.read().await;
-        assert!(timers.contains_key(&process.id));
-    }
-
-    #[tokio::test]
-    async fn test_cancel_process_shutdown() {
-        let global_config = GlobalConfig::default();
-        let mut scheduler = InactivityScheduler::new(global_config);
-
-        let temp_dir = TempDir::new().unwrap();
-        let process = Process::new(
-            "test-process".to_string(),
-            "echo test".to_string(),
-            temp_dir.path().to_string_lossy().to_string(),
-            "env-1".to_string(),
-        );
-
-        scheduler
-            .schedule_process_shutdown(&process.id, Duration::from_secs(60))
-            .await
-            .unwrap();
-        assert_eq!(scheduler.shutdown_timers.read().await.len(), 1);
-
-        scheduler.cancel_shutdown(&process.id).await;
-        assert_eq!(scheduler.shutdown_timers.read().await.len(), 0);
-    }
-}
-
 use crate::config::GlobalConfig;
 use crate::error::Result;
 use std::collections::HashMap;
@@ -594,5 +387,212 @@ impl InactivityScheduler {
     pub async fn get_scheduled_shutdown_count(&self) -> usize {
         let timers = self.shutdown_timers.read().await;
         timers.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::GlobalConfig;
+    use crate::process::Process;
+    use std::time::Duration;
+    use tempfile::TempDir;
+    use tokio::time::Instant;
+
+    #[tokio::test]
+    async fn test_activity_tracker_creation() {
+        let tracker = ActivityTracker::new();
+        assert!(tracker.process_activities.read().await.is_empty());
+        assert!(tracker.environment_activities.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_record_process_activity() {
+        let tracker = ActivityTracker::new();
+        let process_id = "test-process-1".to_string();
+
+        tracker.record_process_activity(&process_id).await;
+
+        let activities = tracker.process_activities.read().await;
+        assert!(activities.contains_key(&process_id));
+        let activity = activities.get(&process_id).unwrap();
+        assert!(activity.last_activity_time.elapsed().as_secs() < 1);
+    }
+
+    #[tokio::test]
+    async fn test_record_environment_activity() {
+        let tracker = ActivityTracker::new();
+        let env_id = "test-env-1".to_string();
+
+        tracker.record_environment_activity(&env_id).await;
+
+        let activities = tracker.environment_activities.read().await;
+        assert!(activities.contains_key(&env_id));
+    }
+
+    #[tokio::test]
+    async fn test_check_process_inactivity_within_timeout() {
+        let tracker = ActivityTracker::new();
+        let process_id = "test-process-1".to_string();
+
+        tracker.record_process_activity(&process_id).await;
+
+        let is_inactive = tracker
+            .check_process_inactivity(&process_id, Duration::from_secs(10))
+            .await;
+        assert!(!is_inactive);
+    }
+
+    #[tokio::test]
+    async fn test_check_process_inactivity_beyond_timeout() {
+        let tracker = ActivityTracker::new();
+        let process_id = "test-process-1".to_string();
+
+        // Manually insert old activity
+        {
+            let mut activities = tracker.process_activities.write().await;
+            activities.insert(
+                process_id.clone(),
+                ActivityInfo {
+                    last_activity_time: Instant::now() - Duration::from_secs(20),
+                    activity_count: 1,
+                },
+            );
+        }
+
+        let is_inactive = tracker
+            .check_process_inactivity(&process_id, Duration::from_secs(10))
+            .await;
+        assert!(is_inactive);
+    }
+
+    #[tokio::test]
+    async fn test_get_all_inactive_processes() {
+        let tracker = ActivityTracker::new();
+
+        // Add active and inactive processes
+        tracker.record_process_activity("active-process").await;
+
+        {
+            let mut activities = tracker.process_activities.write().await;
+            activities.insert(
+                "inactive-process".to_string(),
+                ActivityInfo {
+                    last_activity_time: Instant::now() - Duration::from_secs(20),
+                    activity_count: 1,
+                },
+            );
+        }
+
+        let inactive = tracker
+            .get_all_inactive_processes(Duration::from_secs(10))
+            .await;
+        assert_eq!(inactive.len(), 1);
+        assert!(inactive.contains(&"inactive-process".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_old_activities() {
+        let tracker = ActivityTracker::new();
+
+        // Add recent and old activities
+        tracker.record_process_activity("recent-process").await;
+
+        {
+            let mut activities = tracker.process_activities.write().await;
+            activities.insert(
+                "old-process".to_string(),
+                ActivityInfo {
+                    last_activity_time: Instant::now() - Duration::from_secs(7200), // 2 hours old
+                    activity_count: 1,
+                },
+            );
+        }
+
+        let cleaned = tracker
+            .cleanup_old_activities(Duration::from_secs(3600))
+            .await; // 1 hour cutoff
+        assert_eq!(cleaned, 1);
+
+        let activities = tracker.process_activities.read().await;
+        assert!(activities.contains_key("recent-process"));
+        assert!(!activities.contains_key("old-process"));
+    }
+
+    #[tokio::test]
+    async fn test_inactivity_scheduler_creation() {
+        let global_config = GlobalConfig::default();
+        let scheduler = InactivityScheduler::new(global_config);
+
+        assert!(
+            !scheduler
+                .is_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_inactivity_scheduler_start_stop() {
+        let global_config = GlobalConfig::default();
+        let mut scheduler = InactivityScheduler::new(global_config);
+
+        scheduler.start().await.unwrap();
+        assert!(
+            scheduler
+                .is_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+
+        scheduler.stop().await.unwrap();
+        assert!(
+            !scheduler
+                .is_running
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_schedule_process_shutdown() {
+        let global_config = GlobalConfig::default();
+        let mut scheduler = InactivityScheduler::new(global_config);
+
+        let temp_dir = TempDir::new().unwrap();
+        let process = Process::new(
+            "test-process".to_string(),
+            "echo test".to_string(),
+            temp_dir.path().to_string_lossy().to_string(),
+            "env-1".to_string(),
+        );
+
+        scheduler
+            .schedule_process_shutdown(&process.id, Duration::from_millis(100))
+            .await
+            .unwrap();
+
+        let timers = scheduler.shutdown_timers.read().await;
+        assert!(timers.contains_key(&process.id));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_process_shutdown() {
+        let global_config = GlobalConfig::default();
+        let mut scheduler = InactivityScheduler::new(global_config);
+
+        let temp_dir = TempDir::new().unwrap();
+        let process = Process::new(
+            "test-process".to_string(),
+            "echo test".to_string(),
+            temp_dir.path().to_string_lossy().to_string(),
+            "env-1".to_string(),
+        );
+
+        scheduler
+            .schedule_process_shutdown(&process.id, Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(scheduler.shutdown_timers.read().await.len(), 1);
+
+        scheduler.cancel_shutdown(&process.id).await;
+        assert_eq!(scheduler.shutdown_timers.read().await.len(), 0);
     }
 }

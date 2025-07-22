@@ -55,7 +55,9 @@ impl DaemonHandles {
         let environment_count = active_environments.len();
 
         // Count total processes across all active environments
-        let total_processes = self.count_total_processes(&orchestration_service, &active_environments).await;
+        let total_processes = self
+            .count_total_processes(&orchestration_service, &active_environments)
+            .await;
 
         let status = DaemonStatusResponse {
             running: true,

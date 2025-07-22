@@ -192,6 +192,7 @@ pub struct HealthCheckResult {
 /// This trait abstracts the high-level process orchestration operations,
 /// enabling testing with mock implementations and providing a clean
 /// interface for process management workflows.
+#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait ProcessOrchestrationTrait: Send + Sync {
     // Core Orchestration Methods
@@ -248,10 +249,14 @@ pub trait ProcessOrchestrationTrait: Send + Sync {
     ) -> Result<Vec<LogEntry>>;
 
     /// List running processes for the specified environment
-    async fn list_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>>;
+    async fn list_processes_for_environment(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<ProcessInfo>>;
 
     /// Get comprehensive process information for an environment
-    async fn get_processes_for_environment(&self, environment_id: &str) -> Result<Vec<ProcessInfo>>;
+    async fn get_processes_for_environment(&self, environment_id: &str)
+    -> Result<Vec<ProcessInfo>>;
 
     /// Get process summary for an environment (processes, total count, running count)
     async fn get_environment_process_summary(
