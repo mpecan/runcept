@@ -62,6 +62,9 @@ pub enum RunceptError {
     #[error("Environment error: {0}")]
     EnvironmentError(String),
 
+    #[error("Health check error: {0}")]
+    HealthCheckError(String),
+
     #[error("MCP error: {0}")]
     McpError(String),
 
@@ -108,6 +111,7 @@ impl RunceptError {
                 | RunceptError::DatabaseError(_)
                 | RunceptError::SqlError(_)
                 | RunceptError::MigrationError(_)
+                | RunceptError::HealthCheckError(_)
                 | RunceptError::TimeoutError(_)
                 | RunceptError::ConnectionError(_)
         )
@@ -119,6 +123,7 @@ impl RunceptError {
             RunceptError::ConfigError(_) => "CONFIG_ERROR",
             RunceptError::DatabaseError(_) => "DATABASE_ERROR",
             RunceptError::EnvironmentError(_) => "ENVIRONMENT_ERROR",
+            RunceptError::HealthCheckError(_) => "HEALTH_CHECK_ERROR",
             RunceptError::McpError(_) => "MCP_ERROR",
             RunceptError::IoError(_) => "IO_ERROR",
             RunceptError::JsonError(_) => "JSON_ERROR",

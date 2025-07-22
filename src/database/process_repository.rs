@@ -1,5 +1,6 @@
 use crate::error::Result;
-use crate::process::Process;
+use crate::process::{Process, ProcessRepositoryTrait};
+use async_trait::async_trait;
 use sqlx::{Pool, Row, Sqlite};
 use std::sync::Arc;
 
@@ -468,6 +469,107 @@ impl ProcessRepository {
             .await?;
 
         Ok(result.rows_affected())
+    }
+}
+
+#[async_trait]
+impl ProcessRepositoryTrait for ProcessRepository {
+    async fn insert_process(&self, process: &Process) -> Result<()> {
+        self.insert_process(process).await
+    }
+
+    async fn get_process_by_name(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<Option<ProcessRecord>> {
+        self.get_process_by_name(environment_id, name).await
+    }
+
+    async fn get_process_by_name_validated(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<Option<ProcessRecord>> {
+        self.get_process_by_name_validated(environment_id, name)
+            .await
+    }
+
+    async fn delete_process(&self, environment_id: &str, name: &str) -> Result<bool> {
+        self.delete_process(environment_id, name).await
+    }
+
+    async fn update_process_status(
+        &self,
+        environment_id: &str,
+        name: &str,
+        status: &str,
+    ) -> Result<()> {
+        self.update_process_status(environment_id, name, status)
+            .await
+    }
+
+    async fn get_running_processes(&self) -> Result<Vec<(String, String, Option<i64>)>> {
+        self.get_running_processes().await
+    }
+
+    async fn get_processes_by_status(&self, status: &str) -> Result<Vec<ProcessRecord>> {
+        self.get_processes_by_status(status).await
+    }
+
+    async fn set_process_pid(&self, environment_id: &str, name: &str, pid: i64) -> Result<()> {
+        self.set_process_pid(environment_id, name, pid).await
+    }
+
+    async fn clear_process_pid(&self, environment_id: &str, name: &str) -> Result<()> {
+        self.clear_process_pid(environment_id, name).await
+    }
+
+    async fn get_processes_by_environment(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<ProcessRecord>> {
+        self.get_processes_by_environment(environment_id).await
+    }
+
+    async fn validate_environment(&self, environment_id: &str) -> Result<bool> {
+        self.validate_environment(environment_id).await
+    }
+
+    async fn cleanup_processes_by_environment(&self, environment_id: &str) -> Result<u64> {
+        self.cleanup_processes_by_environment(environment_id).await
+    }
+
+    async fn update_process_command(
+        &self,
+        environment_id: &str,
+        name: &str,
+        command: &str,
+    ) -> Result<()> {
+        self.update_process_command(environment_id, name, command)
+            .await
+    }
+
+    async fn update_process_working_dir(
+        &self,
+        environment_id: &str,
+        name: &str,
+        working_dir: &str,
+    ) -> Result<()> {
+        self.update_process_working_dir(environment_id, name, working_dir)
+            .await
+    }
+
+    async fn update_process_activity(&self, environment_id: &str, name: &str) -> Result<()> {
+        self.update_process_activity(environment_id, name).await
+    }
+
+    async fn count_processes_by_environment(&self, environment_id: &str) -> Result<i64> {
+        self.count_processes_by_environment(environment_id).await
+    }
+
+    async fn count_processes_by_status(&self, status: &str) -> Result<i64> {
+        self.count_processes_by_status(status).await
     }
 }
 

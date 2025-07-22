@@ -483,6 +483,46 @@ impl RunceptTestEnvironment {
 
         mcp_cmd.spawn()
     }
+
+    /// Get the daemon logs for debugging purposes
+    pub fn get_daemon_logs(&self) -> Result<String, std::io::Error> {
+        let log_path = self.runcept_dir.join("logs").join("daemon.log");
+        if log_path.exists() {
+            std::fs::read_to_string(log_path)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Daemon log file not found",
+            ))
+        }
+    }
+
+    /// Get the MCP server logs for debugging purposes
+   pub fn get_mcp_server_logs(&self) -> Result<String, std::io::Error> {
+        let log_path = self.runcept_dir.join("logs").join("mcp-server.log");
+        if log_path.exists() {
+            std::fs::read_to_string(log_path)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "MCP server log file not found",
+            ))
+        }
+    }
+
+    /// Get the cli logs for debugging purposes
+   pub fn get_cli_logs(&self) -> Result<String, std::io::Error> {
+        let log_path = self.runcept_dir.join("logs").join("cli.log");
+        if log_path.exists() {
+            std::fs::read_to_string(log_path)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "CLI log file not found",
+            ))
+        }
+    }
+
 }
 
 impl Drop for RunceptTestEnvironment {

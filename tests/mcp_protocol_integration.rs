@@ -539,6 +539,17 @@ mod mcp_protocol_tests {
         let test_file_path = test_env.project_dir().join("test_marker.txt");
         std::fs::write(&test_file_path, "working_directory_test").unwrap();
 
+        println!("Test file written: {:?}", test_file_path);
+        println!("Test path: {:?}", test_file_path.display());
+        assert!(
+            test_file_path.exists(),
+            "Test marker file should exist at: {}",
+            test_file_path.display()
+        );
+        // Ensure the test file has the correct content
+        let content = std::fs::read_to_string(&test_file_path).unwrap();
+        assert_eq!(content, "working_directory_test", "Test file content mismatch");
+
         // Initialize project
         test_env
             .init_project()
@@ -572,7 +583,7 @@ mod mcp_protocol_tests {
                 name: Cow::Owned("add_process".to_string()),
                 arguments: Some(rmcp::object!({
                     "name": "test-working-dir",
-                    "command": "ls test_marker.txt && sleep 1",
+                    "command": "bash -c 'pwd && ls test_marker.txt && sleep 1'",
                     "working_dir": ".",
                     "auto_restart": false
                 })),
@@ -649,6 +660,23 @@ mod mcp_protocol_tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
+
+        // If the test is failing, output daemon logs for debugging
+        if !log_content.contains("test_marker.txt") {
+            println!("\n=== DAEMON LOGS ===");
+            if let Ok(daemon_logs) = test_env.test_env.get_daemon_logs() {
+                println!("{}", daemon_logs);
+            } else {
+                println!("Failed to get daemon logs");
+            }
+            
+            println!("\n=== MCP SERVER LOGS ===");
+            if let Ok(mcp_logs) = test_env.test_env.get_mcp_server_logs() {
+                println!("{}", mcp_logs);
+            } else {
+                println!("Failed to get MCP server logs");
+            }
+        }
 
         assert!(
             log_content.contains("test_marker.txt"),

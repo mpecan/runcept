@@ -2,38 +2,38 @@ use crate::cli::commands::{DaemonResponse, LogLine, LogsResponse, ProcessInfo};
 use crate::config::ProcessDefinition;
 use crate::error::{Result, RunceptError};
 use crate::logging::{log_debug, log_error, log_info};
-use crate::process::ProcessManager;
+use crate::process::DefaultProcessOrchestrationService;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Handles for process-related operations - thin delegation layer
 #[derive(Clone)]
 pub struct ProcessHandles {
-    process_manager: Arc<RwLock<ProcessManager>>,
+    orchestration_service: Arc<RwLock<DefaultProcessOrchestrationService>>,
     current_environment_id: Arc<RwLock<Option<String>>>,
 }
 
 impl ProcessHandles {
     pub fn new(
-        process_manager: Arc<RwLock<ProcessManager>>,
+        orchestration_service: Arc<RwLock<DefaultProcessOrchestrationService>>,
         current_environment_id: Arc<RwLock<Option<String>>>,
     ) -> Self {
         Self {
-            process_manager,
+            orchestration_service,
             current_environment_id,
         }
     }
 
-    /// Start a process - delegates to ProcessManager
+    /// Start a process - delegates to ProcessOrchestrationService
     pub async fn start_process(
         &self,
         name: String,
         environment: Option<String>,
     ) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(environment).await?;
-        let mut process_manager = self.process_manager.write().await;
+        let mut orchestration_service = self.orchestration_service.write().await;
 
-        match process_manager
+        match orchestration_service
             .start_process_by_name_in_environment(&name, &environment_id)
             .await
         {
@@ -46,16 +46,16 @@ impl ProcessHandles {
         }
     }
 
-    /// Stop a process - delegates to ProcessManager
+    /// Stop a process - delegates to ProcessOrchestrationService
     pub async fn stop_process(
         &self,
         name: String,
         environment: Option<String>,
     ) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(environment).await?;
-        let mut process_manager = self.process_manager.write().await;
+        let mut orchestration_service = self.orchestration_service.write().await;
 
-        match process_manager
+        match orchestration_service
             .stop_process_by_name_in_environment(&name, &environment_id)
             .await
         {
@@ -68,16 +68,16 @@ impl ProcessHandles {
         }
     }
 
-    /// Restart a process - delegates to ProcessManager
+    /// Restart a process - delegates to ProcessOrchestrationService
     pub async fn restart_process(
         &self,
         name: String,
         environment: Option<String>,
     ) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(environment).await?;
-        let mut process_manager = self.process_manager.write().await;
+        let mut orchestration_service = self.orchestration_service.write().await;
 
-        match process_manager
+        match orchestration_service
             .restart_process_by_name_in_environment(&name, &environment_id)
             .await
         {
@@ -93,9 +93,9 @@ impl ProcessHandles {
     /// List processes in current environment - delegates to ProcessManager
     pub async fn list_processes(&self, environment: Option<String>) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(environment).await?;
-        let process_manager = self.process_manager.read().await;
+        let orchestration_service = self.orchestration_service.read().await;
 
-        match process_manager
+        match orchestration_service
             .list_processes_for_environment(&environment_id)
             .await
         {
@@ -115,13 +115,10 @@ impl ProcessHandles {
     /// Kill all processes
     pub async fn kill_all_processes(&self) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(None).await?;
-        let process_manager = self.process_manager.write().await;
+        let mut orchestration_service = self.orchestration_service.write().await;
 
-        match process_manager
-            .runtime_manager
-            .write()
-            .await
-            .stop_all_processes(&environment_id)
+        match orchestration_service
+            .stop_all_processes_in_environment(&environment_id)
             .await
         {
             Ok(_) => Ok(DaemonResponse::Success {
@@ -146,10 +143,10 @@ impl ProcessHandles {
             None,
         );
         let environment_id = self.resolve_environment_id(environment).await?;
-        let process_manager = self.process_manager.read().await;
+        let orchestration_service = self.orchestration_service.read().await;
 
         // Delegate to ProcessManager
-        match process_manager
+        match orchestration_service
             .get_process_logs_by_name_in_environment(&name, &environment_id, lines)
             .await
         {
@@ -194,9 +191,9 @@ impl ProcessHandles {
         );
 
         let environment_id = self.resolve_environment_id(environment).await?;
-        let mut process_manager = self.process_manager.write().await;
+        let mut orchestration_service = self.orchestration_service.write().await;
 
-        match process_manager
+        match orchestration_service
             .add_process_to_environment(process.clone(), &environment_id)
             .await
         {
@@ -222,9 +219,9 @@ impl ProcessHandles {
         environment: Option<String>,
     ) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(environment).await?;
-        let mut process_manager = self.process_manager.write().await;
+        let mut orchestration_service = self.orchestration_service.write().await;
 
-        match process_manager
+        match orchestration_service
             .remove_process_from_environment(&name, &environment_id)
             .await
         {
@@ -245,9 +242,9 @@ impl ProcessHandles {
         environment: Option<String>,
     ) -> Result<DaemonResponse> {
         let environment_id = self.resolve_environment_id(environment).await?;
-        let mut process_manager = self.process_manager.write().await;
+        let mut orchestration_service = self.orchestration_service.write().await;
 
-        match process_manager
+        match orchestration_service
             .update_process_in_environment(&name, process, &environment_id)
             .await
         {
@@ -265,8 +262,8 @@ impl ProcessHandles {
         &self,
         environment_id: &str,
     ) -> Result<Vec<ProcessInfo>> {
-        let process_manager = self.process_manager.read().await;
-        process_manager
+        let orchestration_service = self.orchestration_service.read().await;
+        orchestration_service
             .get_processes_for_environment(environment_id)
             .await
     }
@@ -276,8 +273,8 @@ impl ProcessHandles {
         &self,
         environment_id: &str,
     ) -> Result<(Vec<ProcessInfo>, usize, usize)> {
-        let process_manager = self.process_manager.read().await;
-        process_manager
+        let orchestration_service = self.orchestration_service.read().await;
+        orchestration_service
             .get_environment_process_summary(environment_id)
             .await
     }
@@ -287,8 +284,8 @@ impl ProcessHandles {
         match environment_override {
             Some(env_id) => {
                 // Validate that the environment exists and is active
-                let process_manager = self.process_manager.read().await;
-                if let Some(env_manager) = &process_manager.environment_manager {
+                let orchestration_service = self.orchestration_service.read().await;
+                if let Some(env_manager) = &orchestration_service.environment_manager {
                     let env_manager_guard = env_manager.read().await;
                     let env = env_manager_guard.get_environment(&env_id).ok_or_else(|| {
                         RunceptError::EnvironmentError(format!(

@@ -1,7 +1,7 @@
 use crate::cli::commands::{DaemonResponse, DaemonStatusResponse};
 use crate::config::EnvironmentManager;
 use crate::error::{Result, RunceptError};
-use crate::process::ProcessManager;
+use crate::process::DefaultProcessOrchestrationService;
 use crate::scheduler::InactivityScheduler;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use tokio::sync::{RwLock, mpsc};
 /// Handles for daemon-related operations
 #[derive(Clone)]
 pub struct DaemonHandles {
-    process_manager: Arc<RwLock<ProcessManager>>,
+    orchestration_service: Arc<RwLock<DefaultProcessOrchestrationService>>,
     environment_manager: Arc<RwLock<EnvironmentManager>>,
     inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
     #[allow(dead_code)]
@@ -23,7 +23,7 @@ pub struct DaemonHandles {
 
 impl DaemonHandles {
     pub fn new(
-        process_manager: Arc<RwLock<ProcessManager>>,
+        orchestration_service: Arc<RwLock<DefaultProcessOrchestrationService>>,
         environment_manager: Arc<RwLock<EnvironmentManager>>,
         inactivity_scheduler: Arc<RwLock<Option<InactivityScheduler>>>,
         current_environment_id: Arc<RwLock<Option<String>>>,
@@ -32,7 +32,7 @@ impl DaemonHandles {
         shutdown_tx: Option<mpsc::Sender<()>>,
     ) -> Self {
         Self {
-            process_manager,
+            orchestration_service,
             environment_manager,
             inactivity_scheduler,
             current_environment_id,
@@ -44,7 +44,7 @@ impl DaemonHandles {
 
     /// Get daemon status including uptime, process counts, and environment counts
     pub async fn get_daemon_status(&self) -> Result<DaemonResponse> {
-        let process_manager = self.process_manager.read().await;
+        let orchestration_service = self.orchestration_service.read().await;
         let env_manager = self.environment_manager.read().await;
 
         let uptime = self.start_time.elapsed().unwrap_or(Duration::from_secs(0));
@@ -63,7 +63,7 @@ impl DaemonHandles {
         // Count total processes across all active environments
         let mut total_processes = 0;
         for (env_id, _) in &active_environments {
-            if let Ok(processes) = process_manager.list_processes_for_environment(env_id).await {
+            if let Ok(processes) = orchestration_service.list_processes_for_environment(env_id).await {
                 total_processes += processes.len();
             }
         }
