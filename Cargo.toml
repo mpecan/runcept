@@ -11,6 +11,16 @@ documentation = "https://github.com/mpecan/runcept#readme"
 keywords = ["process-manager", "mcp", "cli", "rust", "sync-processes"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
+exclude = [
+    "test_env/",
+    "test-project/",
+    ".serena/",
+    "rmcp-code/",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    ".github/",
+    "migrations/"
+]
 
 [[bin]]
 name = "runcept"
