@@ -73,7 +73,7 @@ where
         info!("Orchestration: Start requested for process '{}:{}' by orchestrator", environment_id, process_name);
 
         // Delegate to execution service
-        let mut execution_service = self.execution_service.write().await;
+        let execution_service = self.execution_service.read().await;
         let result = execution_service
             .start_process(process_name, environment_id)
             .await?;
@@ -100,7 +100,7 @@ where
         // Log orchestration activity
 
         // Delegate to execution service
-        let mut execution_service = self.execution_service.write().await;
+        let execution_service = self.execution_service.read().await;
         execution_service
             .stop_process(process_name, environment_id)
             .await?;
@@ -127,7 +127,7 @@ where
         // Log orchestration activity
 
         // Delegate to execution service
-        let mut execution_service = self.execution_service.write().await;
+        let execution_service = self.execution_service.read().await;
         execution_service
             .restart_process(process_name, environment_id)
             .await?;

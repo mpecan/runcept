@@ -494,3 +494,10 @@ impl Process {
         self.updated_at = Utc::now();
     }
 }
+
+/// Handle for a running process (execution service specific)
+pub struct ExecutionProcessHandle {
+    pub child: std::sync::Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    pub shutdown_tx: tokio::sync::mpsc::Sender<()>,
+    pub logger: std::sync::Arc<tokio::sync::Mutex<crate::process::ProcessLogger>>,
+}

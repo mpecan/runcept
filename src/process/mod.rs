@@ -1,8 +1,11 @@
 mod configuration;
 mod conversions;
 mod execution_service;
+mod group_manager;
 mod health_check_impl;
+mod lifecycle_manager;
 mod logging;
+mod monitoring_service;
 mod orchestration_service;
 mod runtime_impl;
 mod traits;
@@ -10,8 +13,11 @@ mod types;
 
 pub use conversions::*;
 pub use execution_service::*;
+pub use group_manager::*;
 pub use health_check_impl::*;
+pub use lifecycle_manager::*;
 pub use logging::*;
+pub use monitoring_service::*;
 pub use orchestration_service::*;
 pub use runtime_impl::*;
 pub use traits::*;
