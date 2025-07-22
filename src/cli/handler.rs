@@ -1,5 +1,3 @@
-
-
 use crate::cli::client::DaemonClient;
 use crate::cli::commands::{CliArgs, CliResult, Commands, DaemonAction, DaemonRequest};
 use crate::config::project::find_project_config;

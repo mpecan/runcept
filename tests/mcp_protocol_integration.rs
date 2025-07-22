@@ -83,8 +83,6 @@ mod mcp_protocol_tests {
             self.test_env.project_dir()
         }
 
-
-
         fn init_project(&self) -> Result<(), Box<dyn std::error::Error>> {
             let output = self
                 .test_env
@@ -602,9 +600,7 @@ mod mcp_protocol_tests {
         let add_content = add_response
             .content
             .iter()
-            .filter_map(|c| {
-                c.clone().raw.as_text().map(|text| text.text.clone())
-            })
+            .filter_map(|c| c.clone().raw.as_text().map(|text| text.text.clone()))
             .collect::<Vec<_>>()
             .join("\n");
         println!("{add_content}");
@@ -647,9 +643,7 @@ mod mcp_protocol_tests {
         let log_content = logs_response
             .content
             .iter()
-            .filter_map(|c| {
-                c.clone().raw.as_text().map(|text| text.text.clone())
-            })
+            .filter_map(|c| c.clone().raw.as_text().map(|text| text.text.clone()))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -733,9 +727,7 @@ mod mcp_protocol_tests {
         let log_subdir_content = logs_subdir_response
             .content
             .iter()
-            .filter_map(|c| {
-                c.clone().raw.as_text().map(|text| text.text.clone())
-            })
+            .filter_map(|c| c.clone().raw.as_text().map(|text| text.text.clone()))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -871,9 +863,7 @@ mod mcp_protocol_tests {
         let status_content = status_response
             .content
             .iter()
-            .filter_map(|c| {
-                c.clone().raw.as_text().map(|text| text.text.clone())
-            })
+            .filter_map(|c| c.clone().raw.as_text().map(|text| text.text.clone()))
             .collect::<Vec<_>>()
             .join("\n");
 

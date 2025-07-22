@@ -193,7 +193,7 @@ async fn test_mcp_server_handles_invalid_input() {
                                 || stderr_content.contains("protocol")
                                 || stderr_content.is_empty(), // Empty is acceptable
                             "MCP server should provide meaningful error for invalid input. Stderr: {stderr_content}"
-        );
+                        );
                     }
                 }
             }

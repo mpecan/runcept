@@ -1,5 +1,3 @@
-
-
 use crate::cli::commands::{DaemonRequest, DaemonResponse};
 use crate::error::{Result, RunceptError};
 use std::path::PathBuf;
