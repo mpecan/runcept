@@ -2,7 +2,7 @@ use crate::cli::commands::{DaemonRequest, DaemonResponse};
 use crate::ipc::{IpcPath, connect};
 use rmcp::handler::server::tool::Parameters;
 use rmcp::{
-    Error as McpError, RoleServer, ServerHandler, handler::server::router::tool::ToolRouter,
+    ErrorData as McpError, RoleServer, ServerHandler, handler::server::router::tool::ToolRouter,
     model::*, schemars, service::RequestContext, tool, tool_handler, tool_router,
 };
 use std::sync::Arc;
