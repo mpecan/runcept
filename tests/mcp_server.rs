@@ -21,7 +21,7 @@ async fn test_mcp_server_starts_and_responds() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -78,7 +78,7 @@ async fn test_mcp_server_with_environment_context() {
 
     // Create a more complex config with multiple processes
     test_env
-        .create_config_file(multi_process_config())
+        .create_config_file(&multi_process_config())
         .await
         .unwrap();
 
@@ -151,7 +151,7 @@ async fn test_mcp_server_handles_invalid_input() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -221,7 +221,7 @@ async fn test_mcp_server_concurrent_access() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 

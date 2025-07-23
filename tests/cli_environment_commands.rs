@@ -19,7 +19,7 @@ async fn test_environment_activation_and_deactivation() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -118,7 +118,7 @@ async fn test_daemon_persistence_across_restarts() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -172,7 +172,7 @@ async fn test_environment_enforcement_for_process_commands() {
 
     // Now create the environment and test that commands work with --environment flag
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -224,7 +224,7 @@ async fn test_environment_activation_without_daemon() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -358,7 +358,7 @@ async fn test_database_functionality_with_environment() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
