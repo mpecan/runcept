@@ -1,6 +1,6 @@
 [package]
 name = "runcept"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["mpecan <matjaz.pecan@gmail.com>"]
 description = "Runcept - A Rust-based process manager that runs and intercepts sync processes with MCP server and CLI interface"
