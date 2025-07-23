@@ -176,7 +176,7 @@ async fn test_list_command_with_multiple_processes() {
 
     // Create config with multiple processes in different states
     test_env
-        .create_config_file(multi_process_config())
+        .create_config_file(&multi_process_config())
         .await
         .unwrap();
 
@@ -233,7 +233,7 @@ async fn test_process_management_with_environment_override() {
 
     // Create a test config
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -276,7 +276,7 @@ async fn test_process_management_error_cases() {
     .await;
 
     test_env
-        .create_config_file(basic_test_config())
+        .create_config_file(&basic_test_config())
         .await
         .unwrap();
 
@@ -328,7 +328,7 @@ async fn test_concurrent_process_operations() {
     .await;
 
     test_env
-        .create_config_file(multi_process_config())
+        .create_config_file(&multi_process_config())
         .await
         .unwrap();
 
