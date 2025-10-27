@@ -207,7 +207,7 @@ jobs:
         run: cargo build --release --bin runcept
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: runcept-${{ matrix.os }}
           path: |
@@ -252,7 +252,7 @@ jobs:
           RUST_LOG: debug
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage-report
           path: target/llvm-cov/html/
